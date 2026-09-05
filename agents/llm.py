@@ -1,0 +1,110 @@
+"""Provider-agnostic LLM access.
+
+One entry point, `complete()`, returns plain text from either the Anthropic API
+or a local Ollama model (via its OpenAI-compatible endpoint). Provider and model
+are chosen by environment variables so no agent code changes when switching.
+
+Env:
+    MODEL_PROVIDER   "anthropic" | "ollama"   (default "ollama")
+    MODEL            model name; falls back to CLAUDE_MODEL for back-compat
+    OLLAMA_BASE_URL  default "http://localhost:11434/v1"
+    ANTHROPIC_API_KEY   (anthropic provider only)
+"""
+
+import os
+
+from logger import log
+
+_clients = {}
+
+
+def resolve_provider():
+    return os.environ.get("MODEL_PROVIDER", "ollama").lower()
+
+
+def resolve_model():
+    model = os.environ.get("MODEL") or os.environ.get("CLAUDE_MODEL")
+    if not model:
+        raise RuntimeError("no model configured: set MODEL (or CLAUDE_MODEL)")
+    return model
+
+
+def with_system(messages, system):
+    """Prepend a system message (OpenAI-style) when one is given."""
+    if not system:
+        return messages
+    return [{"role": "system", "content": system}, *messages]
+
+
+def anthropic_text(content_blocks):
+    """Join the text blocks of an Anthropic response, dropping tool-use blocks."""
+    return "\n".join(b.text for b in content_blocks if b.type == "text")
+
+
+def openai_text(choices):
+    """Extract assistant text from an OpenAI/Ollama chat completion."""
+    return choices[0].message.content or ""
+
+
+def ollama_extra():
+    """Extra request kwargs for Ollama.
+
+    Thinking models (ornith, qwen3.5) spend the token budget on reasoning and
+    can return empty `content` (finish_reason=length). `reasoning_effort=none`
+    turns thinking off so the budget goes to the answer. Set
+    OLLAMA_REASONING_EFFORT="" to allow thinking again.
+    """
+    effort = os.environ.get("OLLAMA_REASONING_EFFORT", "none")
+    return {"reasoning_effort": effort} if effort else {}
+
+
+def _anthropic_client():
+    if "anthropic" not in _clients:
+        from anthropic import AsyncAnthropic
+
+        _clients["anthropic"] = AsyncAnthropic(
+            api_key=os.environ.get("ANTHROPIC_API_KEY")
+        )
+    return _clients["anthropic"]
+
+
+def _ollama_client():
+    if "ollama" not in _clients:
+        from openai import AsyncOpenAI
+
+        base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        _clients["ollama"] = AsyncOpenAI(base_url=base_url, api_key="ollama")
+    return _clients["ollama"]
+
+
+async def complete(*, messages, max_tokens, system=None, tools=None):
+    """Run one completion and return its text, dispatching on MODEL_PROVIDER."""
+    provider = resolve_provider()
+    model = resolve_model()
+
+    if provider == "anthropic":
+        client = _anthropic_client()
+        kwargs = {"model": model, "max_tokens": max_tokens, "messages": messages}
+        if system:
+            kwargs["system"] = system
+        if tools:
+            kwargs["tools"] = tools
+        response = await client.messages.create(**kwargs)
+        return anthropic_text(response.content)
+
+    if provider == "ollama":
+        if tools:
+            # ponytail: server-side tools (e.g. web_search) have no Ollama
+            # equivalent yet — see IDEAS.md step 3. Ignore for now; the agent
+            # answers from parametric knowledge until a real search tool lands.
+            log("llm", {"warning": "tools ignored under ollama provider", "model": model})
+        client = _ollama_client()
+        response = await client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=with_system(messages, system),
+            **ollama_extra(),
+        )
+        return openai_text(response.choices)
+
+    raise ValueError(f"unknown MODEL_PROVIDER: {provider!r} (use 'anthropic' or 'ollama')")

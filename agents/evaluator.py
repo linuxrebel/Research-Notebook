@@ -1,17 +1,15 @@
 import json
-import os
 
-from anthropic import AsyncAnthropic
-
+from agents.llm import complete
 from logger import log
 
-client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+_SYSTEM = 'Respond with exactly one word: "APPROVED" or "REVISE". Nothing else.'
 
 
 async def evaluate(notes, summary):
-    response = await client.messages.create(
-        model=os.environ["CLAUDE_MODEL"],
+    verdict = await complete(
         max_tokens=300,
+        system=_SYSTEM,
         messages=[
             {
                 "role": "user",
@@ -27,7 +25,6 @@ async def evaluate(notes, summary):
         ],
     )
 
-    block = next((b for b in response.content if b.type == "text"), None)
-    verdict = block.text.strip() if block else None
+    verdict = verdict.strip()
     log("evaluator", {"verdict": verdict, "summary": summary})
     return verdict

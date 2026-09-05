@@ -1,41 +1,34 @@
 import json
-import os
-
-from anthropic import AsyncAnthropic
 
 from agents.json_utils import parse_json
+from agents.llm import complete
 from logger import log
 
-client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+_SYSTEM = "You are a JSON API. Respond with only valid JSON — no prose, no code fences."
 
 
-async def _request(notes):
-    response = await client.messages.create(
-        model=os.environ["CLAUDE_MODEL"],
-        max_tokens=800,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "Read these research notes and produce a JSON object with\n"
-                    'this exact shape: { "title": string, "keyPoints": string[], '
-                    '"takeaway": string }.\n'
-                    "Return 3 key points. Respond with ONLY the JSON, no other text.\n\n"
-                    f"Research notes:\n{notes}"
-                ),
-            }
-        ],
-    )
-    return next((b.text for b in response.content if b.type == "text"), "{}")
+def _messages(notes):
+    return [
+        {
+            "role": "user",
+            "content": (
+                "Read these research notes and produce a JSON object with\n"
+                'this exact shape: { "title": string, "keyPoints": string[], '
+                '"takeaway": string }.\n'
+                "Return 3 key points. Respond with ONLY the JSON, no other text.\n\n"
+                f"Research notes:\n{notes}"
+            ),
+        }
+    ]
 
 
 async def summarize(notes):
-    raw = await _request(notes)
+    raw = await complete(messages=_messages(notes), max_tokens=800, system=_SYSTEM)
     try:
         summary = parse_json(raw)
     except json.JSONDecodeError:
         log("summarizer", {"warning": "invalid JSON, retrying", "raw": raw})
-        raw = await _request(notes)
+        raw = await complete(messages=_messages(notes), max_tokens=800, system=_SYSTEM)
         summary = parse_json(raw)  # second failure raises, aborting the pipeline
 
     log("summarizer", {"input": notes, "output": summary})

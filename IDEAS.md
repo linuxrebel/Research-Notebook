@@ -6,13 +6,13 @@ Running list. Newest at top. Mark done with `[x]` and a short note; leave open a
 
   **Model decision:** `ornith-1.5:9b` (9B dense, qwen35 core, 262k ctx, tools + thinking). Ornith is purpose-tuned for agentic + coding tasks, which matches this pipeline; provenance is public (Ornith research group, on HuggingFace + Ollama library). Baseline/control: `qwen3.5:latest` (neutral base). Quality escalation: `ornith-1.5:35B` (MoE) if 9B summarizer JSON is unreliable.
 
-  **Port plan (no code yet):**
-  1. **Client abstraction** — swap `AsyncAnthropic` for a provider that points at Ollama's OpenAI-compat endpoint. Options: `openai` AsyncOpenAI with `base_url` + `api_key="ollama"`, or the `ollama` Python lib. Env: `MODEL_PROVIDER` (`anthropic`|`ollama`), `OLLAMA_BASE_URL`, model name (rename `CLAUDE_MODEL` → `MODEL` or keep both).
-  2. **Message/response shape** — Ollama's OpenAI-compat returns `choices[].message.content` (a string), not Anthropic's `content` blocks with `type`. The researcher/summarizer/evaluator all filter `block.type == "text"` — that logic changes per provider. Abstract "get text from response" behind the client wrapper.
-  3. **web_search** — no Ollama equivalent for `web_search_20250305`. Researcher needs a real search tool (SearXNG / DuckDuckGo / Brave API) wired as a tool call, or a non-search notes path. **Biggest build item.**
-  4. **thinking output** — ornith/qwen3.5 emit reasoning. Via OpenAI-compat it's usually separate, but if it leaks into content, `parse_json` fence-strip + brace-slice (see BUGS.md, done) already recovers. Can hard-disable with `think: false`.
-  5. **System prompt** — ornith ships a baked-in agentic prompt. For the summarizer's strict "ONLY JSON" output, override with our own `system` message.
-  6. **Verify** — extend the offline test suite around the client abstraction (mock responses per provider); live smoke test against `ornith-1.5:9b` once wired.
+  **Port plan:**
+  1. [x] **Client abstraction** — `agents/llm.py` `complete()` dispatches on `MODEL_PROVIDER` (`anthropic`|`ollama`). Ollama uses `openai.AsyncOpenAI` at `OLLAMA_BASE_URL`. Env: `MODEL` (falls back to `CLAUDE_MODEL`). Clients are lazy singletons (no key needed at import).
+  2. [x] **Message/response shape** — `anthropic_text()` (joins `type=="text"` blocks) vs `openai_text()` (`choices[0].message.content`), both behind `complete()`.
+  3. [ ] **web_search** — no Ollama equivalent for `web_search_20250305`. Researcher needs a real search tool (SearXNG / DuckDuckGo / Brave API) wired as a tool call, or a non-search notes path. **Biggest build item — NEXT.** Confirmed live: without it, ornith refuses ("no web access") and the pipeline summarizes the refusal.
+  4. [x] **thinking output** — thinking models spend the token budget on reasoning and return empty `content` (finish_reason=length). `think:false` via extra_body is IGNORED by the compat endpoint; `reasoning_effort="none"` works. Wired as `ollama_extra()` (env `OLLAMA_REASONING_EFFORT`, default `none`). `parse_json` still backstops any leak.
+  5. [x] **System prompt** — summarizer and evaluator pass their own `system` (strict JSON / one-word verdict), overriding ornith's baked-in prompt.
+  6. [~] **Verify** — offline suite covers pure helpers (`tests/test_llm.py`); live smoke on `ornith-1.5:9b` passes end-to-end (valid JSON, coordinator loop OK). Per-provider mocked `complete()` tests still TODO.
 
 ## Notes
 
