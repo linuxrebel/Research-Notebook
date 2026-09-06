@@ -109,4 +109,8 @@ async def main():
     print(json.dumps(result, indent=2))
 
 
-asyncio.run(main())
+try:
+    asyncio.run(main())
+except (KeyboardInterrupt, EOFError):
+    print("\nCancelled.")
+    sys.exit(130)
