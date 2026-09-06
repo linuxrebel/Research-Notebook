@@ -2,6 +2,8 @@
 
 Running list. Newest at top. Mark done with `[x]` and a short note; leave open as `[ ]`.
 
+- [x] **Package as `Notebook` — interactive CLI + installer** — shipped on `development`. Interactive-only flow (`cli.py`): Ollama preflight, ask topic, readline-edit, suggest+edit output dir name, collision handling (reuse/new/abort), confirm. `dir_name`/`name` threaded through `run_pipeline` → `write_outputs` → `hook_obsidian` so the chosen name drives both the output dir and the vault note. Root installer (`install.sh`) → `/opt/Notebook` + `/usr/local/bin/Notebook` symlink, dedicated venv, generated `.env`; checks Obsidian + Ollama + model; discovers vault home and offers a dedicated `Notebook` vault or an existing one; reinstall preserves `.env`. `uninstall.sh` leaves user data. Full `/opt` run not yet executed (needs sudo). Plan + verification checklist: `NOTEBOOK_PLAN.md`.
+
 - [ ] **Support local models via Ollama** — run the pipeline against a local model instead of the Anthropic API. Ollama exposes an OpenAI-compatible endpoint at `http://localhost:11434/v1`, so this means a configurable base URL + model name (env-driven) plus a client abstraction.
 
   **Model decision:** `ornith-1.5:9b` (9B dense, qwen35 core, 262k ctx, tools + thinking). Ornith is purpose-tuned for agentic + coding tasks, which matches this pipeline; provenance is public (Ornith research group, on HuggingFace + Ollama library). Baseline/control: `qwen3.5:latest` (neutral base). Quality escalation: `ornith-1.5:35B` (MoE) if 9B summarizer JSON is unreliable.

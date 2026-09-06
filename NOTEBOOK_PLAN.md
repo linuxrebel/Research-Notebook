@@ -6,6 +6,20 @@ forces a human in the loop to limit guessing. The API/server path
 
 Status legend: `[ ]` todo · `[x]` done & verified.
 
+## Status (as of commit on `development`)
+
+**Built and committed.** All files exist on `development`:
+`cli.py`, `agents/coordinator.py`, `agents/output.py`, `agents/llm.py`,
+`Notebook`, `install.sh`, `uninstall.sh`, plus tests.
+
+**Verified:** 60/60 tests pass · Python compiles · all three scripts
+`bash -n` clean · CLI flow exercised live (decline + collision-abort) against a
+running Ollama · installer root-gate and vault-discovery snippet run correctly.
+
+**Not yet run:** the full `/opt` install (`sudo ./install.sh`) — venv build,
+file copy, `.env` generation, and the `ollama list` model check are
+statically verified but not executed end-to-end (needs root; awaiting go).
+
 ---
 
 ## Locked decisions
