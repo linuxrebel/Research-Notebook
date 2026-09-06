@@ -98,6 +98,25 @@ def test_hook_creates_symlink_and_unhook(tmp_path, monkeypatch):
     assert os.path.isfile(os.path.join(out, "summary.md"))
 
 
+def test_hook_auto_provisions_new_vault(tmp_path, monkeypatch):
+    vault = tmp_path / "Obsidian_Vaults" / "multi-agent-101"  # does not exist yet
+    monkeypatch.setenv("OBSIDIAN_VAULT", str(vault))
+    write_outputs(RESULT, base_dir=str(tmp_path / "research"))
+
+    assert (vault / ".obsidian" / "app.json").is_file()
+    assert os.path.islink(vault / "Research" / "state-of-rust-async-in-2026.md")
+
+
+def test_hook_preserves_existing_obsidian_config(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    (vault / ".obsidian").mkdir(parents=True)
+    (vault / ".obsidian" / "app.json").write_text('{"mine": true}')
+    monkeypatch.setenv("OBSIDIAN_VAULT", str(vault))
+
+    write_outputs(RESULT, base_dir=str(tmp_path / "research"))
+    assert (vault / ".obsidian" / "app.json").read_text() == '{"mine": true}'
+
+
 def test_hook_does_not_clobber_real_file(tmp_path, monkeypatch):
     vault = tmp_path / "vault"
     (vault / "Research").mkdir(parents=True)

@@ -65,16 +65,31 @@ def _write_unhook_script(out_dir, link):
     return path
 
 
+def _ensure_vault(vault):
+    """Make `vault` a standalone Obsidian vault by creating a minimal .obsidian/
+    marker if one isn't already there. Existing config is left untouched."""
+    dot_obsidian = os.path.join(vault, ".obsidian")
+    app_json = os.path.join(dot_obsidian, "app.json")
+    if not os.path.isdir(dot_obsidian):
+        os.makedirs(dot_obsidian, exist_ok=True)
+    if not os.path.exists(app_json):
+        with open(app_json, "w") as f:
+            f.write("{}\n")
+
+
 def hook_obsidian(result, out_dir):
     """Symlink summary.md into the Obsidian vault; return the link path or None.
 
-    No-op (returns None) when OBSIDIAN_VAULT is unset, or when a real (non-symlink)
-    file already occupies the target — we never clobber existing notes.
+    Auto-provisions the vault (creates it + a minimal .obsidian/ marker) so a
+    per-project OBSIDIAN_VAULT works with no manual "open as vault" step.
+    No-op (returns None) when OBSIDIAN_VAULT is unset, or when a real
+    (non-symlink) file already occupies the target — we never clobber notes.
     """
     vault = os.environ.get("OBSIDIAN_VAULT")
     if not vault:
         return None
 
+    _ensure_vault(vault)
     research_sub = os.path.join(vault, "Research")
     os.makedirs(research_sub, exist_ok=True)
     link = os.path.join(research_sub, f"{slugify(result['topic'])}.md")
