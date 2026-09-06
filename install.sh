@@ -12,6 +12,10 @@ DEST="${DEST:-/opt/Notebook}"
 BIN="${BIN:-/usr/local/bin/Notebook}"
 SRC="$(dirname "$(readlink -f "$0")")"
 
+# Fixed project settings (not user-chosen).
+MODEL="ornith-1.5:9b"
+OLLAMA_URL="http://localhost:11434/v1"
+
 # --- root check ---
 if [ "$(id -u)" -ne 0 ]; then
   echo "Must run as root. Try: sudo ./install.sh" >&2
@@ -66,12 +70,8 @@ if [ -f "$DEST/.env" ]; then
   echo "Existing install found — updating. Keeping $DEST/.env (config unchanged)."
 fi
 
-# --- gather config (fresh install only) ---
-if [ "$UPDATE" -eq 1 ]; then
-  # Reuse the model already configured, so the model check below is meaningful.
-  MODEL="$(sed -n 's/^MODEL=//p' "$DEST/.env" | head -1)"
-  MODEL="${MODEL:-ornith-1.5:9b}"
-else
+# --- vault choice (fresh install only; update keeps the existing .env) ---
+if [ "$UPDATE" -eq 0 ]; then
   OBS_CFG="$(find_obsidian_config)"
   # discover existing vaults + their common parent (via python)
   readarray -t VAULT_INFO < <(python3 - "$OBS_CFG" "$REAL_HOME" <<'PY'
@@ -116,17 +116,11 @@ PY
     fi
   fi
   echo "Vault: $VAULT"
-
-  echo
-  read -r -p "Ollama model [ornith-1.5:9b]: " MODEL
-  MODEL="${MODEL:-ornith-1.5:9b}"
-  read -r -p "Ollama base URL [http://localhost:11434/v1]: " OLLAMA_URL
-  OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434/v1}"
 fi
 
-# --- the chosen model must be pulled ---
+# --- the required model must be pulled ---
 if ! ollama list | awk '{print $1}' | grep -Fxq "$MODEL"; then
-  echo "Model '$MODEL' is not pulled. Run:" >&2
+  echo "Required model '$MODEL' is not installed. Run:" >&2
   echo "  ollama pull $MODEL" >&2
   echo "then re-run: sudo ./install.sh" >&2
   exit 1

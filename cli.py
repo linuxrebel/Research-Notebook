@@ -44,17 +44,28 @@ def edit_input(prompt, prefill=""):
         readline.set_startup_hook()
 
 
+def confirm_edit(prompt, value):
+    """Show value on an editable line and re-confirm after any edit, looping
+    until the user accepts it unchanged (presses Enter without changing it)."""
+    while True:
+        new = edit_input(prompt, value)
+        if new == value:
+            return new
+        value = new
+
+
 def research_base():
     return os.environ.get("RESEARCH_DIR") or os.path.expanduser("~/research")
 
 
 def choose_dir_name(topic):
-    """Suggest a slug, let the user edit it, resolve collisions."""
+    """Suggest a slug, let the user edit + confirm it, resolve collisions."""
     base = research_base()
-    name = edit_input("Directory name: ", slugify(topic))
+    prompt = "You can edit the directory name (edit if needed, Enter to accept): "
+    name = confirm_edit(prompt, slugify(topic))
     while True:
         if not name:
-            name = edit_input("Directory name (cannot be empty): ", slugify(topic))
+            name = confirm_edit(prompt, slugify(topic))
             continue
         target = os.path.join(base, name)
         if not os.path.exists(target):
@@ -66,7 +77,7 @@ def choose_dir_name(topic):
         if choice in ("a", "abort"):
             print("Aborted.")
             sys.exit(0)
-        name = edit_input("New directory name: ", name)
+        name = confirm_edit("New directory name (edit if needed, Enter to accept): ", name)
 
 
 def gather_request():
@@ -74,7 +85,7 @@ def gather_request():
     if not topic:
         print("No topic given. Aborting.")
         sys.exit(1)
-    topic = edit_input("Edit if needed (Enter to accept): ", topic)
+    topic = confirm_edit("I understood the topic to be (edit if needed, Enter to accept): ", topic)
     if not topic:
         print("No topic given. Aborting.")
         sys.exit(1)
