@@ -26,13 +26,25 @@ if [ -z "$REAL_HOME" ]; then
   exit 1
 fi
 
+# --- Obsidian config locations (one list, used for both detection + discovery) ---
+OBS_PATHS=(
+  "$REAL_HOME/.config/obsidian/obsidian.json"                                    # native
+  "$REAL_HOME/.var/app/md.obsidian.Obsidian/config/obsidian/obsidian.json"       # flatpak
+  "$REAL_HOME/snap/obsidian/current/.config/obsidian/obsidian.json"             # snap
+)
+find_obsidian_config() {
+  for p in "${OBS_PATHS[@]}"; do
+    [ -f "$p" ] && { echo "$p"; return 0; }
+  done
+  return 0
+}
+
 # --- Obsidian must be installed ---
 obsidian_installed() {
   command -v obsidian >/dev/null 2>&1 && return 0
   sudo -u "$REAL_USER" flatpak info md.obsidian.Obsidian >/dev/null 2>&1 && return 0
   flatpak info md.obsidian.Obsidian >/dev/null 2>&1 && return 0
-  [ -f "$REAL_HOME/.var/app/md.obsidian.Obsidian/config/obsidian/obsidian.json" ] && return 0
-  [ -f "$REAL_HOME/.config/obsidian/obsidian.json" ] && return 0
+  [ -n "$(find_obsidian_config)" ] && return 0
   return 1
 }
 if ! obsidian_installed; then
@@ -55,16 +67,6 @@ if [ -f "$DEST/.env" ]; then
 fi
 
 # --- gather config (fresh install only) ---
-find_obsidian_config() {
-  for p in \
-    "$REAL_HOME/.config/obsidian/obsidian.json" \
-    "$REAL_HOME/.var/app/md.obsidian.Obsidian/config/obsidian/obsidian.json" \
-    "$REAL_HOME/snap/obsidian/current/.config/obsidian/obsidian.json"; do
-    [ -f "$p" ] && { echo "$p"; return 0; }
-  done
-  return 0
-}
-
 if [ "$UPDATE" -eq 1 ]; then
   # Reuse the model already configured, so the model check below is meaningful.
   MODEL="$(sed -n 's/^MODEL=//p' "$DEST/.env" | head -1)"
@@ -123,7 +125,7 @@ PY
 fi
 
 # --- the chosen model must be pulled ---
-if ! ollama list | awk 'NR>1{print $1}' | grep -Fxq "$MODEL"; then
+if ! ollama list | awk '{print $1}' | grep -Fxq "$MODEL"; then
   echo "Model '$MODEL' is not pulled. Run:" >&2
   echo "  ollama pull $MODEL" >&2
   echo "then re-run: sudo ./install.sh" >&2

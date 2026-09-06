@@ -9,19 +9,27 @@ import json
 import os
 import readline
 import sys
+import urllib.request
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from agents.coordinator import run_pipeline
-from agents.llm import ollama_running, resolve_provider
+from agents.llm import _ollama_native_base, resolve_provider
 from agents.output import slugify
 
 
 def preflight():
     """Fail fast with a friendly message if the local model server is down."""
-    if resolve_provider() == "ollama" and not ollama_running():
+    if resolve_provider() != "ollama":
+        return
+    try:
+        with urllib.request.urlopen(_ollama_native_base() + "/api/tags", timeout=3) as r:
+            up = r.status == 200
+    except Exception:
+        up = False
+    if not up:
         print("Ollama does not appear to be running.")
         print("Start it, then re-run Notebook.")
         sys.exit(1)
