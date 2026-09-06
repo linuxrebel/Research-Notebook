@@ -1,0 +1,114 @@
+# Notebook
+
+A local, multi-agent research pipeline. Give it a topic; a chain of agents
+searches the web, compiles notes, summarizes them into a structured brief, and
+an evaluator gates the result until it passes. Output is written as documents
+and (optionally) linked into an Obsidian vault.
+
+Runs against a **local model via Ollama** by default (no API key, no data
+leaving the machine), or against the **Anthropic API** if configured.
+
+This is a Python port of the "Multi-Agents 101" tutorial pipeline; the original
+Node version lives in `../site/`.
+
+## How it works
+
+Four agents, coordinated with a retry loop:
+
+1. **Researcher** — runs a DuckDuckGo search for the topic and compiles raw,
+   source-tagged notes from the results.
+2. **Summarizer** — turns the notes into a strict-JSON brief (title, key
+   points, takeaway).
+3. **Evaluator** — judges the brief, replying `APPROVED` or `REVISE`.
+4. **Coordinator** — drives the sequence; on `REVISE` it re-summarizes and
+   re-evaluates, up to `MAX_ITERATIONS` (5).
+
+The final result is written to `~/research/<name>/` as four files:
+
+| File          | Contents                                  |
+|---------------|-------------------------------------------|
+| `notes.md`    | raw research notes                        |
+| `summary.json`| the structured summary object             |
+| `summary.md`  | human-readable brief with YAML frontmatter (Obsidian-ready) |
+| `result.json` | the full pipeline result                  |
+
+## Requirements
+
+- Python 3
+- [Ollama](https://ollama.com/download) with the configured model pulled
+  (default `ornith-1.5:9b`):
+  ```bash
+  ollama pull ornith-1.5:9b
+  ```
+- Python deps: `pip install -r requirements.txt`
+
+## Usage
+
+Interactive CLI (asks what to investigate, confirms, then runs):
+
+```bash
+python cli.py
+```
+
+HTTP API (the non-interactive hook for other applications):
+
+```bash
+python server.py
+# POST /run {"topic": "..."}   GET /health
+```
+
+## Configuration (`.env`)
+
+| Variable                 | Purpose                                              | Default                       |
+|--------------------------|------------------------------------------------------|-------------------------------|
+| `MODEL_PROVIDER`         | `ollama` (local) or `anthropic`                      | `ollama`                      |
+| `MODEL`                  | model name for the active provider                   | `ornith-1.5:9b`               |
+| `OLLAMA_BASE_URL`        | Ollama OpenAI-compatible endpoint                    | `http://localhost:11434/v1`   |
+| `OLLAMA_REASONING_EFFORT`| `none` disables thinking (keeps tokens for the answer) | `none`                      |
+| `OLLAMA_KEEP_ALIVE`      | pin the model in memory between runs                 | `30m`                         |
+| `ANTHROPIC_API_KEY`      | only when `MODEL_PROVIDER=anthropic`                 | —                             |
+| `CLAUDE_MODEL`           | model name for the Anthropic provider                | `claude-sonnet-5`             |
+| `PORT`                   | API server port                                      | `3000`                        |
+| `RESEARCH_DIR`           | where documents are written                          | `~/research`                  |
+| `OBSIDIAN_VAULT`         | if set, link output into this vault (see below)      | unset                         |
+
+`.env` is gitignored. Copy the keys above into a local `.env` to configure.
+
+## Obsidian integration
+
+Set `OBSIDIAN_VAULT` to a vault path and each run symlinks the topic's
+`summary.md` into `<vault>/Research/<name>.md`, and drops an `unhook.sh` into
+the result dir to remove that link. The vault is auto-provisioned (created with
+a minimal `.obsidian/` marker) and registered in Obsidian's switcher on first
+use. A real file already at the target is never clobbered.
+
+## Layout
+
+```
+agents/
+  researcher.py   web search + note compilation
+  summarizer.py   notes -> strict-JSON brief
+  evaluator.py    APPROVED / REVISE verdict
+  coordinator.py  pipeline + retry loop
+  llm.py          provider abstraction (Anthropic / Ollama)
+  search.py       DuckDuckGo search
+  output.py       documents + Obsidian hook
+  json_utils.py   robust JSON parsing
+cli.py            interactive entry point
+server.py         HTTP API entry point
+logger.py         structured run logging
+tests/            offline test suite (mocked; no network)
+```
+
+## Development
+
+```bash
+python -m pytest -q
+```
+
+Tests are fully offline (mocked providers, isolated Obsidian config) and safe
+to run repeatedly.
+
+Trackers: [`BUGS.md`](BUGS.md), [`IDEAS.md`](IDEAS.md). The packaged
+installer/CLI design is tracked in [`NOTEBOOK_PLAN.md`](NOTEBOOK_PLAN.md)
+(not yet built).
