@@ -8,7 +8,7 @@ from logger import log
 MAX_ITERATIONS = 5
 
 
-async def run_pipeline(topic):
+async def run_pipeline(topic, dir_name=None):
     await keep_warm()  # pin the local model so repeated runs skip the cold reload
     notes = await research(topic)
 
@@ -32,7 +32,7 @@ async def run_pipeline(topic):
         "verdict": verdict,
     }
 
-    output_dir = write_outputs(result)
+    output_dir = write_outputs(result, name=dir_name)
     result["output_dir"] = output_dir
     log("coordinator", {"output_dir": output_dir})
 

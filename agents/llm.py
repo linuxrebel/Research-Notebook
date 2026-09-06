@@ -75,6 +75,16 @@ def _ollama_native_base():
     return base.rstrip("/")
 
 
+def ollama_running(timeout=3):
+    """True if the Ollama server answers on OLLAMA_BASE_URL. Used for a friendly
+    preflight before a run; the actual completion still surfaces real errors."""
+    try:
+        with urllib.request.urlopen(_ollama_native_base() + "/api/tags", timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
 async def keep_warm():
     """Pin the Ollama model in memory for OLLAMA_KEEP_ALIVE so repeated runs skip
     the cold reload.

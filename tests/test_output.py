@@ -71,6 +71,22 @@ def test_write_outputs_content(tmp_path):
         assert json.load(f)["verdict"] == "APPROVED"
 
 
+def test_write_outputs_name_overrides_slug(tmp_path, monkeypatch):
+    monkeypatch.delenv("OBSIDIAN_VAULT", raising=False)
+    out = write_outputs(RESULT, base_dir=str(tmp_path), name="my-custom-dir")
+    assert out == os.path.join(str(tmp_path), "my-custom-dir")
+    assert os.path.isfile(os.path.join(out, "summary.md"))
+
+
+def test_hook_name_sets_vault_note_filename(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    monkeypatch.setenv("OBSIDIAN_VAULT", str(vault))
+    write_outputs(RESULT, base_dir=str(tmp_path / "research"), name="my-custom-dir")
+    assert os.path.islink(vault / "Research" / "my-custom-dir.md")
+    # the slug-named note must NOT be created when an explicit name is given
+    assert not os.path.lexists(vault / "Research" / "state-of-rust-async-in-2026.md")
+
+
 def test_write_outputs_uses_env(tmp_path, monkeypatch):
     monkeypatch.setenv("RESEARCH_DIR", str(tmp_path))
     monkeypatch.delenv("OBSIDIAN_VAULT", raising=False)

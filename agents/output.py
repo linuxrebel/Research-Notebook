@@ -137,13 +137,14 @@ def register_vault(vault_path):
     return True
 
 
-def hook_obsidian(result, out_dir):
+def hook_obsidian(result, out_dir, name=None):
     """Symlink summary.md into the Obsidian vault; return the link path or None.
 
     Auto-provisions the vault (creates it + a minimal .obsidian/ marker) so a
     per-project OBSIDIAN_VAULT works with no manual "open as vault" step.
     No-op (returns None) when OBSIDIAN_VAULT is unset, or when a real
     (non-symlink) file already occupies the target — we never clobber notes.
+    `name` sets the note filename; defaults to a slug of the topic.
     """
     vault = os.environ.get("OBSIDIAN_VAULT")
     if not vault:
@@ -153,7 +154,7 @@ def hook_obsidian(result, out_dir):
     register_vault(vault)  # best-effort: make it show in Obsidian's switcher
     research_sub = os.path.join(vault, "Research")
     os.makedirs(research_sub, exist_ok=True)
-    link = os.path.join(research_sub, f"{slugify(result['topic'])}.md")
+    link = os.path.join(research_sub, f"{name or slugify(result['topic'])}.md")
     src = os.path.abspath(os.path.join(out_dir, "summary.md"))
 
     if os.path.islink(link):
@@ -166,10 +167,12 @@ def hook_obsidian(result, out_dir):
     return link
 
 
-def write_outputs(result, base_dir=None):
-    """Write the four documents (and Obsidian hook); return the topic directory."""
+def write_outputs(result, base_dir=None, name=None):
+    """Write the four documents (and Obsidian hook); return the topic directory.
+
+    `name` sets the output subdirectory; defaults to a slug of the topic."""
     base = base_dir or os.environ.get("RESEARCH_DIR") or os.path.expanduser("~/research")
-    out_dir = os.path.join(base, slugify(result["topic"]))
+    out_dir = os.path.join(base, name or slugify(result["topic"]))
     os.makedirs(out_dir, exist_ok=True)
 
     with open(os.path.join(out_dir, "notes.md"), "w") as f:
@@ -181,5 +184,5 @@ def write_outputs(result, base_dir=None):
     with open(os.path.join(out_dir, "result.json"), "w") as f:
         json.dump(result, f, indent=2)
 
-    hook_obsidian(result, out_dir)
+    hook_obsidian(result, out_dir, name=name)
     return out_dir

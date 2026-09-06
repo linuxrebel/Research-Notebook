@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# Notebook installer. Installs to /opt/Notebook, symlinks the CLI to
+# /usr/local/bin/Notebook, builds a dedicated venv, and generates .env.
+# Installs as root; the tool then runs as any unprivileged user.
+# Reinstall over an existing install to update: an existing .env is preserved.
+#   sudo ./install.sh
+set -euo pipefail
+
+# DEST/BIN are overridable (env) so the installer can be exercised against
+# temp paths without touching /opt; defaults are the real install locations.
+DEST="${DEST:-/opt/Notebook}"
+BIN="${BIN:-/usr/local/bin/Notebook}"
+SRC="$(dirname "$(readlink -f "$0")")"
+
+# --- root check ---
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Must run as root. Try: sudo ./install.sh" >&2
+  exit 1
+fi
+
+# --- real (non-root) user, for Obsidian + output paths ---
+REAL_USER="${SUDO_USER:-root}"
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+if [ -z "$REAL_HOME" ]; then
+  echo "Could not resolve home for user '$REAL_USER'." >&2
+  exit 1
+fi
+
+# --- Obsidian must be installed ---
+obsidian_installed() {
+  command -v obsidian >/dev/null 2>&1 && return 0
+  sudo -u "$REAL_USER" flatpak info md.obsidian.Obsidian >/dev/null 2>&1 && return 0
+  flatpak info md.obsidian.Obsidian >/dev/null 2>&1 && return 0
+  [ -f "$REAL_HOME/.var/app/md.obsidian.Obsidian/config/obsidian/obsidian.json" ] && return 0
+  [ -f "$REAL_HOME/.config/obsidian/obsidian.json" ] && return 0
+  return 1
+}
+if ! obsidian_installed; then
+  echo "Obsidian not found. Install Obsidian, then re-run: sudo ./install.sh" >&2
+  exit 1
+fi
+
+# --- Ollama must be installed ---
+if ! command -v ollama >/dev/null 2>&1; then
+  echo "Ollama not found. Install it from https://ollama.com/download" >&2
+  echo "then re-run: sudo ./install.sh" >&2
+  exit 1
+fi
+
+# --- update vs fresh install ---
+UPDATE=0
+if [ -f "$DEST/.env" ]; then
+  UPDATE=1
+  echo "Existing install found — updating. Keeping $DEST/.env (config unchanged)."
+fi
+
+# --- gather config (fresh install only) ---
+find_obsidian_config() {
+  for p in \
+    "$REAL_HOME/.config/obsidian/obsidian.json" \
+    "$REAL_HOME/.var/app/md.obsidian.Obsidian/config/obsidian/obsidian.json" \
+    "$REAL_HOME/snap/obsidian/current/.config/obsidian/obsidian.json"; do
+    [ -f "$p" ] && { echo "$p"; return 0; }
+  done
+  return 0
+}
+
+if [ "$UPDATE" -eq 1 ]; then
+  # Reuse the model already configured, so the model check below is meaningful.
+  MODEL="$(sed -n 's/^MODEL=//p' "$DEST/.env" | head -1)"
+  MODEL="${MODEL:-ornith-1.5:9b}"
+else
+  OBS_CFG="$(find_obsidian_config)"
+  # discover existing vaults + their common parent (via python)
+  readarray -t VAULT_INFO < <(python3 - "$OBS_CFG" "$REAL_HOME" <<'PY'
+import json, os, sys
+cfg, home = sys.argv[1], sys.argv[2]
+paths = []
+if cfg and os.path.isfile(cfg):
+    try:
+        with open(cfg) as f:
+            data = json.load(f)
+        paths = [v.get("path") for v in data.get("vaults", {}).values() if v.get("path")]
+    except Exception:
+        pass
+parents = {os.path.dirname(p) for p in paths}
+home_dir = parents.pop() if len(parents) == 1 else os.path.join(home, "Obsidian_Vaults")
+print(home_dir)
+for p in paths:
+    print(p)
+PY
+)
+  VAULT_HOME="${VAULT_INFO[0]}"
+  EXISTING=("${VAULT_INFO[@]:1}")
+
+  echo
+  echo "Obsidian vault for research output:"
+  echo "  1) Dedicated 'Notebook' vault at $VAULT_HOME/Notebook  [default]"
+  i=2
+  for v in "${EXISTING[@]}"; do
+    echo "  $i) Nest under existing vault: $v"
+    i=$((i+1))
+  done
+  read -r -p "Choose [1]: " vc
+  vc="${vc:-1}"
+  if [ "$vc" = "1" ]; then
+    VAULT="$VAULT_HOME/Notebook"
+  else
+    idx=$((vc-2))
+    if [ "$idx" -ge 0 ] && [ "$idx" -lt "${#EXISTING[@]}" ]; then
+      VAULT="${EXISTING[$idx]}"
+    else
+      echo "Invalid choice." >&2; exit 1
+    fi
+  fi
+  echo "Vault: $VAULT"
+
+  echo
+  read -r -p "Ollama model [ornith-1.5:9b]: " MODEL
+  MODEL="${MODEL:-ornith-1.5:9b}"
+  read -r -p "Ollama base URL [http://localhost:11434/v1]: " OLLAMA_URL
+  OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434/v1}"
+fi
+
+# --- the chosen model must be pulled ---
+if ! ollama list | awk 'NR>1{print $1}' | grep -Fxq "$MODEL"; then
+  echo "Model '$MODEL' is not pulled. Run:" >&2
+  echo "  ollama pull $MODEL" >&2
+  echo "then re-run: sudo ./install.sh" >&2
+  exit 1
+fi
+
+# --- copy project to /opt/Notebook (preserve an existing .env) ---
+echo
+echo "Installing to $DEST ..."
+TMP_ENV=""
+if [ "$UPDATE" -eq 1 ]; then
+  TMP_ENV="$(mktemp)"
+  cp "$DEST/.env" "$TMP_ENV"
+fi
+rm -rf "$DEST"
+mkdir -p "$DEST"
+rsync -a \
+  --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
+  --exclude '.pytest_cache' --exclude '.env' \
+  "$SRC"/ "$DEST"/
+
+# --- venv + deps ---
+echo "Building venv ..."
+python3 -m venv "$DEST/.venv"
+"$DEST/.venv/bin/pip" install --quiet --upgrade pip
+"$DEST/.venv/bin/pip" install --quiet -r "$DEST/requirements.txt"
+
+# --- .env: restore on update, generate on fresh ---
+if [ "$UPDATE" -eq 1 ]; then
+  cp "$TMP_ENV" "$DEST/.env"
+  rm -f "$TMP_ENV"
+else
+  cat > "$DEST/.env" <<ENV
+# Generated by install.sh
+MODEL_PROVIDER=ollama
+MODEL=$MODEL
+OLLAMA_BASE_URL=$OLLAMA_URL
+OLLAMA_REASONING_EFFORT=none
+OLLAMA_KEEP_ALIVE=30m
+
+# Anthropic provider (only needed when MODEL_PROVIDER=anthropic)
+ANTHROPIC_API_KEY=
+CLAUDE_MODEL=claude-sonnet-5
+
+PORT=3000
+
+RESEARCH_DIR=$REAL_HOME/research
+OBSIDIAN_VAULT=$VAULT
+ENV
+fi
+
+# --- symlink CLI ---
+ln -sf "$DEST/Notebook" "$BIN"
+chmod +x "$DEST/Notebook" "$DEST/uninstall.sh"
+
+echo
+echo "Done. Run 'Notebook' to start a research project."
+echo "Uninstall: sudo $DEST/uninstall.sh"

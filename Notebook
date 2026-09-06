@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Notebook launcher. Runs the interactive research CLI.
+# Uses the bundled venv if present (created by install.sh), else system python3.
+here="$(dirname "$(readlink -f "$0")")"
+py="$here/.venv/bin/python"
+[ -x "$py" ] || py=python3
+cd "$here" || exit 1
+exec "$py" cli.py "$@"
