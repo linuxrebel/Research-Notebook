@@ -49,15 +49,21 @@ def openai_text(choices):
     return choices[0].message.content or ""
 
 
-def ollama_extra():
+def ollama_extra(reasoning_effort=None):
     """Extra request kwargs for Ollama.
 
     Thinking models (ornith, qwen3.5) spend the token budget on reasoning and
     can return empty `content` (finish_reason=length). `reasoning_effort=none`
-    turns thinking off so the budget goes to the answer. Set
-    OLLAMA_REASONING_EFFORT="" to allow thinking again.
+    turns thinking off so the budget goes to the answer; "low"/"medium"/"high"
+    enable increasing amounts of reasoning (raise max_tokens to leave room for
+    the answer). A per-call value overrides OLLAMA_REASONING_EFFORT; "" allows
+    the model's own default.
     """
-    effort = os.environ.get("OLLAMA_REASONING_EFFORT", "none")
+    effort = (
+        reasoning_effort
+        if reasoning_effort is not None
+        else os.environ.get("OLLAMA_REASONING_EFFORT", "none")
+    )
     return {"reasoning_effort": effort} if effort else {}
 
 
@@ -120,8 +126,12 @@ def _ollama_client():
     return _clients["ollama"]
 
 
-async def complete(*, messages, max_tokens, system=None, tools=None):
-    """Run one completion and return its text, dispatching on MODEL_PROVIDER."""
+async def complete(*, messages, max_tokens, system=None, tools=None, reasoning_effort=None):
+    """Run one completion and return its text, dispatching on MODEL_PROVIDER.
+
+    reasoning_effort applies to Ollama thinking models (per-call override of
+    OLLAMA_REASONING_EFFORT); ignored by the anthropic provider.
+    """
     provider = resolve_provider()
     model = resolve_model()
 
@@ -146,7 +156,7 @@ async def complete(*, messages, max_tokens, system=None, tools=None):
             model=model,
             max_tokens=max_tokens,
             messages=with_system(messages, system),
-            **ollama_extra(),
+            **ollama_extra(reasoning_effort),
         )
         return openai_text(response.choices)
 

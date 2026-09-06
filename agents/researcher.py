@@ -12,6 +12,7 @@ async def research(topic):
     results = await web_search(topic)
     notes = await complete(
         max_tokens=1500,
+        reasoning_effort="none",  # pure compilation from search results; no thinking needed
         system=_SYSTEM,
         messages=[
             {

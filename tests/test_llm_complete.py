@@ -128,6 +128,23 @@ def test_ollama_ignores_tools_but_still_completes(monkeypatch):
     assert "tools" not in fake.calls[0]  # tools not forwarded to ollama
 
 
+def test_ollama_per_call_reasoning_override(monkeypatch):
+    monkeypatch.setenv("MODEL_PROVIDER", "ollama")
+    monkeypatch.setenv("MODEL", "ornith-1.5:9b")
+    monkeypatch.setenv("OLLAMA_REASONING_EFFORT", "none")
+    fake = FakeOpenAI(content="ok")
+    monkeypatch.setattr(llm, "_ollama_client", lambda: fake)
+
+    _run(
+        llm.complete(
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1200,
+            reasoning_effort="medium",
+        )
+    )
+    assert fake.calls[0]["reasoning_effort"] == "medium"
+
+
 def test_unknown_provider_raises(monkeypatch):
     monkeypatch.setenv("MODEL_PROVIDER", "bogus")
     monkeypatch.setenv("MODEL", "x")

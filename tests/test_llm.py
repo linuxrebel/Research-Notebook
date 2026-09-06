@@ -91,6 +91,16 @@ def test_ollama_extra_custom(monkeypatch):
     assert ollama_extra() == {"reasoning_effort": "low"}
 
 
+def test_ollama_extra_override_beats_env(monkeypatch):
+    monkeypatch.setenv("OLLAMA_REASONING_EFFORT", "none")
+    assert ollama_extra("medium") == {"reasoning_effort": "medium"}
+
+
+def test_ollama_extra_override_blank_allows_default(monkeypatch):
+    monkeypatch.setenv("OLLAMA_REASONING_EFFORT", "none")
+    assert ollama_extra("") == {}
+
+
 def test_native_base_strips_v1(monkeypatch):
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
     assert _ollama_native_base() == "http://localhost:11434"

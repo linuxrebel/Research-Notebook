@@ -18,7 +18,9 @@ Running list. Newest at top. Mark done with `[x]` and a short note; leave open a
 
 - [ ] **Query refinement before search** — the topic string is used as the DDG query verbatim (`research(topic)` → `web_search(topic)`). A step that rewrites the topic into better search terms (or multiple queries) could improve note quality. New pre-search step.
 
-- [ ] **Research stage is the latency bottleneck** — measured on `ornith-1.5:9b`: search 2s, research LLM ~150s (max_tokens=1500), summarize ~80s, evaluate ~11s (~250s total, varies). The research generation dominates. Options: lower research `max_tokens` (the DDG snippets are the real content, so the model mostly reformats), stream output, or cap notes length. Full pipeline works; it's just slow and occasionally brushes wall-clock timeouts.
+- [ ] **Latency on the CPU-bound 9B** — `ornith-1.5:9b` (6.2GB) spills the 4GB VRAM → runs 69% CPU / 31% GPU at ~2.6 tok/s (known hardware limit). Lowering `max_tokens` does NOT help: agents stop naturally below the cap (research generates ~398 tokens, finish=stop, not the 1500 cap). Real levers measured: tok/s (a model that fits VRAM, e.g. granite4.1:3b = ~35 tok/s, but lower quality — rejected, quality first), fewer generated tokens (terser prompts), and keep-alive (done: avoids ~85s cold reload).
+
+  Per-agent reasoning (quality-over-speed choice): research=none (~150s), summarize=low (~128s, +48s vs none), evaluate=medium (~38s, +28s). Single pass ~5.3min. Caps raised to 1200 on summarize/evaluate so reasoning tokens don't starve the answer (blank-content bug). **Watch:** medium evaluator judges stricter → more REVISE → coordinator loops; worst case 5 iterations ≈ 16min. Revisit if runs loop too often (lower evaluate to low, or make the evaluator prompt less strict).
 
 ## Notes
 

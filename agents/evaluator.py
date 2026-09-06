@@ -7,8 +7,11 @@ _SYSTEM = 'Respond with exactly one word: "APPROVED" or "REVISE". Nothing else.'
 
 
 async def evaluate(notes, summary):
+    # medium reasoning sharpens the quality gate; max_tokens must cover the
+    # reasoning tokens plus the one-word verdict or content comes back blank.
     verdict = await complete(
-        max_tokens=300,
+        max_tokens=1200,
+        reasoning_effort="medium",
         system=_SYSTEM,
         messages=[
             {

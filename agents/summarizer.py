@@ -40,13 +40,25 @@ def clamp_key_points(summary, n=3):
     return summary
 
 
+# low reasoning helps pick the best 3 points; max_tokens leaves room for
+# reasoning + the JSON so the answer isn't starved (blank-content bug).
+_MAX_TOKENS = 1200
+_REASONING = "low"
+
+
 async def summarize(notes):
-    raw = await complete(messages=_messages(notes), max_tokens=800, system=_SYSTEM)
+    raw = await complete(
+        messages=_messages(notes), max_tokens=_MAX_TOKENS, system=_SYSTEM,
+        reasoning_effort=_REASONING,
+    )
     try:
         summary = parse_json(raw)
     except json.JSONDecodeError:
         log("summarizer", {"warning": "invalid JSON, retrying", "raw": raw})
-        raw = await complete(messages=_messages(notes), max_tokens=800, system=_SYSTEM)
+        raw = await complete(
+            messages=_messages(notes), max_tokens=_MAX_TOKENS, system=_SYSTEM,
+            reasoning_effort=_REASONING,
+        )
         summary = parse_json(raw)  # second failure raises, aborting the pipeline
 
     summary = clamp_key_points(summary)
