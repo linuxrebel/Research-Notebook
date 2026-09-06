@@ -18,6 +18,8 @@ Running list. Newest at top. Mark done with `[x]` and a short note; leave open a
 
 - [ ] **Query refinement before search** — the topic string is used as the DDG query verbatim (`research(topic)` → `web_search(topic)`). A step that rewrites the topic into better search terms (or multiple queries) could improve note quality. New pre-search step.
 
+- [ ] **Research stage is the latency bottleneck** — measured on `ornith-1.5:9b`: search 2s, research LLM ~150s (max_tokens=1500), summarize ~80s, evaluate ~11s (~250s total, varies). The research generation dominates. Options: lower research `max_tokens` (the DDG snippets are the real content, so the model mostly reformats), stream output, or cap notes length. Full pipeline works; it's just slow and occasionally brushes wall-clock timeouts.
+
 ## Notes
 
 - Faithful Python port of the "multi-agents 101" tutorial lives here; original Node version in `../site/`.
