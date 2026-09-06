@@ -16,6 +16,8 @@ import datetime
 import json
 import os
 import re
+import secrets
+import time
 
 
 def slugify(topic, maxlen=80):
@@ -77,6 +79,64 @@ def _ensure_vault(vault):
             f.write("{}\n")
 
 
+def _obsidian_config_candidates():
+    """Possible locations of Obsidian's vault registry (obsidian.json), most
+    common first. Home-relative so it works for any user. OBSIDIAN_CONFIG
+    overrides for non-standard installs."""
+    override = os.environ.get("OBSIDIAN_CONFIG")
+    if override:
+        return [override]
+    home = os.path.expanduser("~")
+    return [
+        os.path.join(home, ".config/obsidian/obsidian.json"),  # native Linux
+        os.path.join(home, ".var/app/md.obsidian.Obsidian/config/obsidian/obsidian.json"),  # flatpak
+        os.path.join(home, "snap/obsidian/current/.config/obsidian/obsidian.json"),  # snap
+        os.path.join(home, "Library/Application Support/obsidian/obsidian.json"),  # macOS
+        os.path.join(os.environ.get("APPDATA", ""), "obsidian/obsidian.json"),  # Windows
+    ]
+
+
+def _find_obsidian_config():
+    for path in _obsidian_config_candidates():
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
+def register_vault(vault_path):
+    """Add the vault to Obsidian's registry so it appears in the app's switcher.
+
+    Idempotent (no duplicate if the path is already registered). Best-effort:
+    returns False and changes nothing if Obsidian's config can't be found or
+    read. Takes effect on Obsidian's next launch; if Obsidian is running it may
+    overwrite the file on exit, so a restart may be needed.
+    """
+    cfg = _find_obsidian_config()
+    if not cfg:
+        return False
+    vault_path = os.path.abspath(vault_path)
+    try:
+        with open(cfg) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    vaults = data.setdefault("vaults", {})
+    if any(v.get("path") == vault_path for v in vaults.values()):
+        return True  # already registered
+    vaults[secrets.token_hex(8)] = {
+        "path": vault_path,
+        "ts": int(time.time() * 1000),
+        "open": False,
+    }
+    try:
+        with open(cfg, "w") as f:
+            json.dump(data, f, indent=2)
+    except OSError:
+        return False
+    return True
+
+
 def hook_obsidian(result, out_dir):
     """Symlink summary.md into the Obsidian vault; return the link path or None.
 
@@ -90,6 +150,7 @@ def hook_obsidian(result, out_dir):
         return None
 
     _ensure_vault(vault)
+    register_vault(vault)  # best-effort: make it show in Obsidian's switcher
     research_sub = os.path.join(vault, "Research")
     os.makedirs(research_sub, exist_ok=True)
     link = os.path.join(research_sub, f"{slugify(result['topic'])}.md")

@@ -2,7 +2,13 @@ import json
 import os
 import subprocess
 
-from agents.output import hook_obsidian, slugify, summary_md, write_outputs
+from agents.output import (
+    hook_obsidian,
+    register_vault,
+    slugify,
+    summary_md,
+    write_outputs,
+)
 
 RESULT = {
     "topic": "State of Rust Async in 2026!",
@@ -128,3 +134,42 @@ def test_hook_does_not_clobber_real_file(tmp_path, monkeypatch):
     assert not os.path.islink(real)
     assert real.read_text() == "my own note"
     assert not os.path.exists(os.path.join(out, "unhook.sh"))
+
+
+def test_register_vault_no_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("OBSIDIAN_CONFIG", str(tmp_path / "nonexistent.json"))
+    assert register_vault(str(tmp_path / "vault")) is False
+
+
+def test_register_vault_adds_entry(tmp_path, monkeypatch):
+    cfg = tmp_path / "obsidian.json"
+    cfg.write_text(json.dumps({"vaults": {"abc": {"path": "/other", "ts": 1, "open": True}}}))
+    monkeypatch.setenv("OBSIDIAN_CONFIG", str(cfg))
+    vault = str(tmp_path / "myvault")
+
+    assert register_vault(vault) is True
+    data = json.loads(cfg.read_text())
+    paths = [v["path"] for v in data["vaults"].values()]
+    assert os.path.abspath(vault) in paths
+    assert "/other" in paths  # existing entry preserved
+
+
+def test_register_vault_idempotent(tmp_path, monkeypatch):
+    cfg = tmp_path / "obsidian.json"
+    cfg.write_text(json.dumps({"vaults": {}}))
+    monkeypatch.setenv("OBSIDIAN_CONFIG", str(cfg))
+    vault = str(tmp_path / "v")
+
+    register_vault(vault)
+    register_vault(vault)  # second call must not duplicate
+    data = json.loads(cfg.read_text())
+    matches = [v for v in data["vaults"].values() if v["path"] == os.path.abspath(vault)]
+    assert len(matches) == 1
+
+
+def test_register_vault_creates_vaults_key(tmp_path, monkeypatch):
+    cfg = tmp_path / "obsidian.json"
+    cfg.write_text("{}")  # no "vaults" key
+    monkeypatch.setenv("OBSIDIAN_CONFIG", str(cfg))
+    assert register_vault(str(tmp_path / "v")) is True
+    assert "vaults" in json.loads(cfg.read_text())
