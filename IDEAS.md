@@ -14,6 +14,10 @@ Running list. Newest at top. Mark done with `[x]` and a short note; leave open a
   5. [x] **System prompt** — summarizer and evaluator pass their own `system` (strict JSON / one-word verdict), overriding ornith's baked-in prompt.
   6. [~] **Verify** — offline suite covers pure helpers (`tests/test_llm.py`); live smoke on `ornith-1.5:9b` passes end-to-end (valid JSON, coordinator loop OK). Per-provider mocked `complete()` tests still TODO.
 
+- [ ] **Auto-hook output into Obsidian** — the pipeline now writes `summary.md` (Obsidian-friendly markdown) per topic under `~/research/<slug>/` (see `agents/output.py`). Feature: optionally write/symlink `summary.md` into an Obsidian vault so runs show up as notes automatically. Open questions: vault path (env `OBSIDIAN_VAULT`?), frontmatter (tags, date, topic), wiki-links between related topics, and whether to copy vs symlink. `summary.md` is the natural target doc for this hook.
+
+- [ ] **Query refinement before search** — the topic string is used as the DDG query verbatim (`research(topic)` → `web_search(topic)`). A step that rewrites the topic into better search terms (or multiple queries) could improve note quality. New pre-search step.
+
 ## Notes
 
 - Faithful Python port of the "multi-agents 101" tutorial lives here; original Node version in `../site/`.
