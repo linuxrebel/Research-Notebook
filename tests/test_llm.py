@@ -3,8 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 
+import agents.llm as llm
 from agents.llm import (
+    _ollama_native_base,
     anthropic_text,
+    keep_warm,
     ollama_extra,
     openai_text,
     resolve_model,
@@ -86,3 +89,38 @@ def test_ollama_extra_blank_omits(monkeypatch):
 def test_ollama_extra_custom(monkeypatch):
     monkeypatch.setenv("OLLAMA_REASONING_EFFORT", "low")
     assert ollama_extra() == {"reasoning_effort": "low"}
+
+
+def test_native_base_strips_v1(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    assert _ollama_native_base() == "http://localhost:11434"
+
+
+def test_native_base_without_v1(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://host:1234")
+    assert _ollama_native_base() == "http://host:1234"
+
+
+def test_keep_warm_skips_for_anthropic(monkeypatch):
+    import asyncio
+
+    monkeypatch.setenv("MODEL_PROVIDER", "anthropic")
+
+    def boom(*a, **k):
+        raise AssertionError("should not hit the network for anthropic")
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", boom)
+    asyncio.run(keep_warm())  # no exception = it returned early
+
+
+def test_keep_warm_skips_when_disabled(monkeypatch):
+    import asyncio
+
+    monkeypatch.setenv("MODEL_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_KEEP_ALIVE", "")
+
+    def boom(*a, **k):
+        raise AssertionError("should not ping when keep-alive is blank")
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", boom)
+    asyncio.run(keep_warm())

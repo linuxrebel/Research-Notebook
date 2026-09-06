@@ -11,7 +11,10 @@ Env:
     ANTHROPIC_API_KEY   (anthropic provider only)
 """
 
+import asyncio
+import json
 import os
+import urllib.request
 
 from logger import log
 
@@ -56,6 +59,46 @@ def ollama_extra():
     """
     effort = os.environ.get("OLLAMA_REASONING_EFFORT", "none")
     return {"reasoning_effort": effort} if effort else {}
+
+
+def _ollama_native_base():
+    """Ollama's native API base (strip the OpenAI-compat /v1 suffix)."""
+    base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1").rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
+    return base.rstrip("/")
+
+
+async def keep_warm():
+    """Pin the Ollama model in memory for OLLAMA_KEEP_ALIVE so repeated runs skip
+    the cold reload.
+
+    keep_alive is honored only by Ollama's native /api/generate, not the
+    OpenAI-compat endpoint we use for completions — but both share the same loaded
+    model instance, so this native ping sets the TTL for the model the compat
+    calls then reuse. No-op unless provider is ollama and keep-alive is set.
+    """
+    if resolve_provider() != "ollama":
+        return
+    ka = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
+    if not ka:
+        return
+
+    def _ping():
+        body = json.dumps({"model": resolve_model(), "keep_alive": ka}).encode()
+        req = urllib.request.Request(
+            _ollama_native_base() + "/api/generate",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=180) as r:
+            r.read()
+
+    try:
+        await asyncio.to_thread(_ping)
+        log("llm", {"keep_warm": resolve_model(), "keep_alive": ka})
+    except Exception as e:  # keep-alive is best-effort; never block the run
+        log("llm", {"keep_warm_failed": str(e)[:150]})
 
 
 def _anthropic_client():

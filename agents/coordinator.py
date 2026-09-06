@@ -2,12 +2,14 @@ from agents.researcher import research
 from agents.summarizer import summarize
 from agents.evaluator import evaluate
 from agents.output import write_outputs
+from agents.llm import keep_warm
 from logger import log
 
 MAX_ITERATIONS = 5
 
 
 async def run_pipeline(topic):
+    await keep_warm()  # pin the local model so repeated runs skip the cold reload
     notes = await research(topic)
 
     summary = await summarize(notes)
