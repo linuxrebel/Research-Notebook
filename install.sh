@@ -138,7 +138,7 @@ rm -rf "$DEST"
 mkdir -p "$DEST"
 rsync -a --no-o --no-g \
   --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
-  --exclude '.pytest_cache' --exclude '.env' \
+  --exclude '.pytest_cache' --exclude '.env' --exclude 'install.sh' \
   "$SRC"/ "$DEST"/
 
 # --- venv + deps ---
