@@ -10,16 +10,20 @@ _SYSTEM = (
 )
 
 
-def _messages(notes):
+def _messages(notes, topic):
     return [
         {
             "role": "user",
             "content": (
+                f'The research topic was: "{topic}".\n'
                 "Read these research notes and produce a JSON object with\n"
                 'this exact shape: { "title": string, "keyPoints": string[], '
                 '"takeaway": string }.\n'
-                "The keyPoints array MUST contain EXACTLY 3 strings — not more, "
-                "not fewer. Choose the 3 most important points.\n"
+                "keyPoints: 3 to 7 strings that directly answer what the topic "
+                "asks. If the topic asks for pros/cons, viability, or a verdict, "
+                "the points must carry them — not generic background.\n"
+                "takeaway: one paragraph stating the actual answer/verdict the "
+                "topic asked for.\n"
                 "Respond with ONLY the JSON, no other text.\n\n"
                 f"Research notes:\n{notes}"
             ),
@@ -27,12 +31,12 @@ def _messages(notes):
     ]
 
 
-def clamp_key_points(summary, n=3):
+def clamp_key_points(summary, n=7):
     """Keep at most n keyPoints.
 
-    ponytail: small local models (ornith-1.5:9b) ignore "exactly 3" and return
-    roughly one point per input bullet. The design wants 3, so enforce it
-    deterministically instead of looping the evaluator to MAX_ITERATIONS.
+    ponytail: small local models (ornith-1.5:9b) ignore point-count limits and
+    return roughly one point per input bullet. Cap deterministically instead of
+    looping the evaluator to MAX_ITERATIONS.
     """
     kp = summary.get("keyPoints")
     if isinstance(kp, list) and len(kp) > n:
@@ -40,15 +44,15 @@ def clamp_key_points(summary, n=3):
     return summary
 
 
-# low reasoning helps pick the best 3 points; max_tokens leaves room for
+# low reasoning helps pick the best points; max_tokens leaves room for
 # reasoning + the JSON so the answer isn't starved (blank-content bug).
 _MAX_TOKENS = 1200
 _REASONING = "low"
 
 
-async def summarize(notes):
+async def summarize(notes, topic):
     raw = await complete(
-        messages=_messages(notes), max_tokens=_MAX_TOKENS, system=_SYSTEM,
+        messages=_messages(notes, topic), max_tokens=_MAX_TOKENS, system=_SYSTEM,
         reasoning_effort=_REASONING,
     )
     try:
@@ -56,7 +60,7 @@ async def summarize(notes):
     except json.JSONDecodeError:
         log("summarizer", {"warning": "invalid JSON, retrying", "raw": raw})
         raw = await complete(
-            messages=_messages(notes), max_tokens=_MAX_TOKENS, system=_SYSTEM,
+            messages=_messages(notes, topic), max_tokens=_MAX_TOKENS, system=_SYSTEM,
             reasoning_effort=_REASONING,
         )
         summary = parse_json(raw)  # second failure raises, aborting the pipeline

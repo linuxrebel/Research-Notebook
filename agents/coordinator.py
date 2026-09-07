@@ -12,14 +12,14 @@ async def run_pipeline(topic, dir_name=None):
     await keep_warm()  # pin the local model so repeated runs skip the cold reload
     notes = await research(topic)
 
-    summary = await summarize(notes)
+    summary = await summarize(notes, topic)
     iteration = 1
-    verdict = await evaluate(notes, summary)
+    verdict = await evaluate(notes, summary, topic)
 
     while verdict != "APPROVED" and iteration < MAX_ITERATIONS:
         log("coordinator", {"iteration": iteration, "verdict": verdict, "action": "retrying summarizer"})
-        summary = await summarize(notes)
-        verdict = await evaluate(notes, summary)
+        summary = await summarize(notes, topic)
+        verdict = await evaluate(notes, summary, topic)
         iteration += 1
 
     log("coordinator", {"finalIteration": iteration, "verdict": verdict})

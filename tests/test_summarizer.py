@@ -1,9 +1,14 @@
 from agents.summarizer import clamp_key_points
 
 
-def test_clamp_trims_to_three():
+def test_clamp_trims_to_default_seven():
+    s = {"keyPoints": list("abcdefghij")}  # 10 -> 7
+    assert clamp_key_points(s)["keyPoints"] == list("abcdefg")
+
+
+def test_clamp_explicit_n():
     s = {"keyPoints": ["a", "b", "c", "d", "e"]}
-    assert clamp_key_points(s)["keyPoints"] == ["a", "b", "c"]
+    assert clamp_key_points(s, 3)["keyPoints"] == ["a", "b", "c"]
 
 
 def test_clamp_leaves_three():
