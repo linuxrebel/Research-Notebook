@@ -4,6 +4,7 @@ Interactive by design: it forces a human in the loop to limit guessing. For a
 non-interactive/machine entry point, use server.py (the API).
 """
 
+import argparse
 import asyncio
 import json
 import os
@@ -18,6 +19,25 @@ load_dotenv()
 from agents.coordinator import run_pipeline
 from agents.llm import _ollama_native_base, resolve_provider
 from agents.output import slugify
+from logger import enable_debug_log
+
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        prog="Notebook",
+        description="Interactive local-LLM research launcher. Prompts for a "
+                    "topic, runs the multi-agent pipeline, and writes results "
+                    "under $RESEARCH_DIR (default ~/research).",
+        epilog="--debug writes WARN/ERROR events to "
+               "$RESEARCH_DIR/notebook-debug.log. For a non-interactive API, "
+               "run server.py instead.",
+    )
+    p.add_argument(
+        "--debug",
+        action="store_true",
+        help="log WARN/ERROR events to a debug file in the research dir",
+    )
+    return p.parse_args()
 
 
 def preflight():
@@ -101,7 +121,9 @@ def gather_request():
     return topic, name
 
 
-async def main():
+async def main(args):
+    if args.debug:
+        enable_debug_log(os.path.join(research_base(), "notebook-debug.log"))
     preflight()
     topic, name = gather_request()
     result = await run_pipeline(topic, dir_name=name)
@@ -110,7 +132,7 @@ async def main():
 
 
 try:
-    asyncio.run(main())
+    asyncio.run(main(parse_args()))
 except (KeyboardInterrupt, EOFError):
     print("\nCancelled.")
     sys.exit(130)

@@ -16,7 +16,7 @@ import json
 import os
 import urllib.request
 
-from logger import log
+from logger import error, log, warn
 
 _clients = {}
 
@@ -104,7 +104,7 @@ async def keep_warm():
         await asyncio.to_thread(_ping)
         log("llm", {"keep_warm": resolve_model(), "keep_alive": ka})
     except Exception as e:  # keep-alive is best-effort; never block the run
-        log("llm", {"keep_warm_failed": str(e)[:150]})
+        error("llm", {"keep_warm_failed": str(e)[:150]})
 
 
 def _anthropic_client():
@@ -150,7 +150,7 @@ async def complete(*, messages, max_tokens, system=None, tools=None, reasoning_e
             # ponytail: server-side tools (e.g. web_search) have no Ollama
             # equivalent yet — see IDEAS.md step 3. Ignore for now; the agent
             # answers from parametric knowledge until a real search tool lands.
-            log("llm", {"warning": "tools ignored under ollama provider", "model": model})
+            warn("llm", {"warning": "tools ignored under ollama provider", "model": model})
         client = _ollama_client()
         response = await client.chat.completions.create(
             model=model,
