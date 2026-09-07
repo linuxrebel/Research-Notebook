@@ -136,7 +136,7 @@ if [ "$UPDATE" -eq 1 ]; then
 fi
 rm -rf "$DEST"
 mkdir -p "$DEST"
-rsync -a \
+rsync -a --no-o --no-g \
   --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
   --exclude '.pytest_cache' --exclude '.env' \
   "$SRC"/ "$DEST"/
@@ -170,6 +170,9 @@ RESEARCH_DIR=$REAL_HOME/research
 OBSIDIAN_VAULT=$VAULT
 ENV
 fi
+# root umask can create .env mode 600 (owner-only) — unprivileged user can't
+# read it. Provider is ollama, no secret here, so make it world-readable.
+chmod 0644 "$DEST/.env"
 
 # --- symlink CLI ---
 ln -sf "$DEST/Notebook" "$BIN"
