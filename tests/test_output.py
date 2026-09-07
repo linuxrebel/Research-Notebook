@@ -3,24 +3,20 @@ import os
 import subprocess
 
 from agents.output import (
-    hook_obsidian,
+    hook_obsidian_dir,
     register_vault,
+    research_base,
     slugify,
-    summary_md,
-    write_outputs,
 )
 
-RESULT = {
-    "topic": "State of Rust Async in 2026!",
-    "notes": "- fact one. Source: http://x",
-    "summary": {
-        "title": "Rust Async",
-        "keyPoints": ["a", "b", "c"],
-        "takeaway": "it's good",
-    },
-    "iterations": 1,
-    "verdict": "APPROVED",
-}
+
+def _make_run_dir(base, name="state-of-rust-async-in-2026"):
+    """A minimal finished research folder to hook into a vault."""
+    out = os.path.join(str(base), name)
+    os.makedirs(os.path.join(out, "sources"), exist_ok=True)
+    with open(os.path.join(out, "index.md"), "w") as f:
+        f.write("# topic\n")
+    return out
 
 
 def test_slugify_basic():
@@ -39,94 +35,51 @@ def test_slugify_maxlen():
     assert len(slugify("a" * 200)) == 80
 
 
-def test_summary_md_contains_sections():
-    md = summary_md(RESULT)
-    assert "# Rust Async" in md
-    assert "## Key Points" in md
-    assert "- a" in md
-    assert "## Takeaway" in md
-    assert "## Research Notes" in md
-
-
-def test_summary_md_has_frontmatter():
-    md = summary_md(RESULT)
-    assert md.startswith("---\n")
-    assert 'topic: "State of Rust Async in 2026!"' in md
-    assert "verdict: APPROVED" in md
-    assert "tags: [research, multi-agent-101]" in md
-
-
-def test_write_outputs_creates_four_files(tmp_path):
-    out = write_outputs(RESULT, base_dir=str(tmp_path))
-    assert out == os.path.join(str(tmp_path), "state-of-rust-async-in-2026")
-    for name in ("notes.md", "summary.json", "summary.md", "result.json"):
-        assert os.path.isfile(os.path.join(out, name))
-
-
-def test_write_outputs_content(tmp_path):
-    out = write_outputs(RESULT, base_dir=str(tmp_path))
-    with open(os.path.join(out, "summary.json")) as f:
-        assert json.load(f) == RESULT["summary"]
-    with open(os.path.join(out, "result.json")) as f:
-        assert json.load(f)["verdict"] == "APPROVED"
-
-
-def test_write_outputs_name_overrides_slug(tmp_path, monkeypatch):
-    monkeypatch.delenv("OBSIDIAN_VAULT", raising=False)
-    out = write_outputs(RESULT, base_dir=str(tmp_path), name="my-custom-dir")
-    assert out == os.path.join(str(tmp_path), "my-custom-dir")
-    assert os.path.isfile(os.path.join(out, "summary.md"))
-
-
-def test_hook_name_sets_vault_note_filename(tmp_path, monkeypatch):
-    vault = tmp_path / "vault"
-    monkeypatch.setenv("OBSIDIAN_VAULT", str(vault))
-    write_outputs(RESULT, base_dir=str(tmp_path / "research"), name="my-custom-dir")
-    assert os.path.islink(vault / "Research" / "my-custom-dir.md")
-    # the slug-named note must NOT be created when an explicit name is given
-    assert not os.path.lexists(vault / "Research" / "state-of-rust-async-in-2026.md")
-
-
-def test_write_outputs_uses_env(tmp_path, monkeypatch):
+def test_research_base_env(monkeypatch, tmp_path):
     monkeypatch.setenv("RESEARCH_DIR", str(tmp_path))
-    monkeypatch.delenv("OBSIDIAN_VAULT", raising=False)
-    out = write_outputs(RESULT)
-    assert out.startswith(str(tmp_path))
+    assert research_base() == str(tmp_path)
 
 
 def test_hook_noop_without_vault(tmp_path, monkeypatch):
     monkeypatch.delenv("OBSIDIAN_VAULT", raising=False)
-    out = write_outputs(RESULT, base_dir=str(tmp_path))
-    assert hook_obsidian(RESULT, out) is None
+    out = _make_run_dir(tmp_path)
+    assert hook_obsidian_dir(out, "state-of-rust-async-in-2026") is None
     assert not os.path.exists(os.path.join(out, "unhook.sh"))
 
 
-def test_hook_creates_symlink_and_unhook(tmp_path, monkeypatch):
+def test_hook_symlinks_folder_and_unhook(tmp_path, monkeypatch):
     vault = tmp_path / "vault"
     monkeypatch.setenv("OBSIDIAN_VAULT", str(vault))
-    out = write_outputs(RESULT, base_dir=str(tmp_path / "research"))
+    out = _make_run_dir(tmp_path / "research")
 
-    link = vault / "Research" / "state-of-rust-async-in-2026.md"
+    link = hook_obsidian_dir(out, "state-of-rust-async-in-2026")
     assert os.path.islink(link)
-    assert os.path.realpath(link) == os.path.realpath(os.path.join(out, "summary.md"))
+    assert os.path.realpath(link) == os.path.realpath(out)
+    # a note inside the linked folder is reachable through the vault
+    assert os.path.isfile(os.path.join(link, "index.md"))
 
     unhook = os.path.join(out, "unhook.sh")
-    assert os.path.isfile(unhook)
     assert os.access(unhook, os.X_OK)
-
-    # running unhook removes the symlink, leaves the source intact
     subprocess.run(["bash", unhook], check=True)
     assert not os.path.lexists(link)
-    assert os.path.isfile(os.path.join(out, "summary.md"))
+    assert os.path.isfile(os.path.join(out, "index.md"))  # source folder intact
+
+
+def test_hook_name_sets_vault_folder_name(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    monkeypatch.setenv("OBSIDIAN_VAULT", str(vault))
+    out = _make_run_dir(tmp_path / "research", name="my-custom-dir")
+    hook_obsidian_dir(out, "my-custom-dir")
+    assert os.path.islink(vault / "Research" / "my-custom-dir")
 
 
 def test_hook_auto_provisions_new_vault(tmp_path, monkeypatch):
-    vault = tmp_path / "Obsidian_Vaults" / "multi-agent-101"  # does not exist yet
+    vault = tmp_path / "Obsidian_Vaults" / "notebook"  # does not exist yet
     monkeypatch.setenv("OBSIDIAN_VAULT", str(vault))
-    write_outputs(RESULT, base_dir=str(tmp_path / "research"))
-
+    out = _make_run_dir(tmp_path / "research")
+    hook_obsidian_dir(out, "state-of-rust-async-in-2026")
     assert (vault / ".obsidian" / "app.json").is_file()
-    assert os.path.islink(vault / "Research" / "state-of-rust-async-in-2026.md")
+    assert os.path.islink(vault / "Research" / "state-of-rust-async-in-2026")
 
 
 def test_hook_preserves_existing_obsidian_config(tmp_path, monkeypatch):
@@ -134,19 +87,19 @@ def test_hook_preserves_existing_obsidian_config(tmp_path, monkeypatch):
     (vault / ".obsidian").mkdir(parents=True)
     (vault / ".obsidian" / "app.json").write_text('{"mine": true}')
     monkeypatch.setenv("OBSIDIAN_VAULT", str(vault))
-
-    write_outputs(RESULT, base_dir=str(tmp_path / "research"))
+    out = _make_run_dir(tmp_path / "research")
+    hook_obsidian_dir(out, "state-of-rust-async-in-2026")
     assert (vault / ".obsidian" / "app.json").read_text() == '{"mine": true}'
 
 
-def test_hook_does_not_clobber_real_file(tmp_path, monkeypatch):
+def test_hook_does_not_clobber_real_path(tmp_path, monkeypatch):
     vault = tmp_path / "vault"
     (vault / "Research").mkdir(parents=True)
-    real = vault / "Research" / "state-of-rust-async-in-2026.md"
+    real = vault / "Research" / "state-of-rust-async-in-2026"
     real.write_text("my own note")
     monkeypatch.setenv("OBSIDIAN_VAULT", str(vault))
-
-    out = write_outputs(RESULT, base_dir=str(tmp_path / "research"))
+    out = _make_run_dir(tmp_path / "research")
+    assert hook_obsidian_dir(out, "state-of-rust-async-in-2026") is None
     assert not os.path.islink(real)
     assert real.read_text() == "my own note"
     assert not os.path.exists(os.path.join(out, "unhook.sh"))

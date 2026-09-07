@@ -14,6 +14,7 @@ Env:
 import asyncio
 import json
 import os
+import urllib.error
 import urllib.request
 
 from logger import error, log, warn
@@ -44,27 +45,73 @@ def anthropic_text(content_blocks):
     return "\n".join(b.text for b in content_blocks if b.type == "text")
 
 
-def openai_text(choices):
-    """Extract assistant text from an OpenAI/Ollama chat completion."""
-    return choices[0].message.content or ""
+_CTX_BUCKETS = (2048, 4096, 8192, 16384, 32768, 65536, 131072)
 
 
-def ollama_extra(reasoning_effort=None):
-    """Extra request kwargs for Ollama.
+def _estimate_tokens(messages):
+    """Rough upper-ish token count for the prompt. ~3 chars/token: fetched docs
+    are markdown/code/URLs, which tokenize denser than the ~4 chars/token of
+    plain prose, so undercounting here would size the window too small. The
+    grow-on-overflow retry in ollama_chat is the backstop when it still misses."""
+    return sum(len(m.get("content") or "") for m in messages) // 3
 
-    Thinking models (ornith, qwen3.5) spend the token budget on reasoning and
-    can return empty `content` (finish_reason=length). `reasoning_effort=none`
-    turns thinking off so the budget goes to the answer; "low"/"medium"/"high"
-    enable increasing amounts of reasoning (raise max_tokens to leave room for
-    the answer). A per-call value overrides OLLAMA_REASONING_EFFORT; "" allows
-    the model's own default.
+
+def _ollama_num_ctx(messages, max_tokens):
+    """Context window to request from Ollama, sized to the actual content.
+
+    A fixed huge window is a CPU tax: Ollama allocates (and, on a size change,
+    reloads the model with) the whole KV cache, and on CPU that alone can take
+    minutes before the first token. So size to what this call needs — prompt +
+    generation + margin — rounded up to a bucket for cache reuse across calls.
+    The whole fetched document still fits; we just don't allocate 32k for a 3k
+    prompt. Set OLLAMA_NUM_CTX to pin a fixed window instead."""
+    fixed = os.environ.get("OLLAMA_NUM_CTX")
+    if fixed:
+        return int(fixed)
+    need = _estimate_tokens(messages) + max_tokens + 512
+    return next((b for b in _CTX_BUCKETS if need <= b), need)
+
+
+def _ollama_timeout():
+    """HTTP timeout (seconds) for one /api/chat call. Generous by default: on a
+    CPU-only box this 9b model generates at only ~2 tokens/sec, so a call that
+    produces several hundred tokens legitimately runs for many minutes. Too low
+    a timeout kills a working call. Override with OLLAMA_TIMEOUT."""
+    return float(os.environ.get("OLLAMA_TIMEOUT", "1800"))
+
+
+def _think_param(reasoning_effort=None):
+    """Native /api/chat `think` value from an effort string.
+
+    "none" -> False (thinking off); "low"/"medium"/"high" -> that level (ornith
+    honors levels); "" -> None (omit; model default). Per-call value overrides
+    OLLAMA_REASONING_EFFORT.
     """
     effort = (
         reasoning_effort
         if reasoning_effort is not None
         else os.environ.get("OLLAMA_REASONING_EFFORT", "none")
     )
-    return {"reasoning_effort": effort} if effort else {}
+    if not effort:
+        return None
+    return False if effort == "none" else effort
+
+
+def ollama_reply_text(message):
+    """Text from a native /api/chat message dict.
+
+    On reasoning models a tight budget can be spent entirely on hidden thinking,
+    leaving `content` blank (finish on length). Surface the thinking rather than
+    returning "" and ending the turn on a silent blank.
+    """
+    content = (message.get("content") or "").strip()
+    if content:
+        return content
+    for key in ("thinking", "reasoning", "reasoning_content"):
+        t = message.get(key)
+        if t and t.strip():
+            return t.strip()
+    return ""
 
 
 def _ollama_native_base():
@@ -117,13 +164,47 @@ def _anthropic_client():
     return _clients["anthropic"]
 
 
-def _ollama_client():
-    if "ollama" not in _clients:
-        from openai import AsyncOpenAI
+async def ollama_chat(*, model, messages, max_tokens, reasoning_effort=None):
+    """One completion via Ollama's NATIVE /api/chat.
 
-        base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-        _clients["ollama"] = AsyncOpenAI(base_url=base_url, api_key="ollama")
-    return _clients["ollama"]
+    Native — not the OpenAI-compat /v1 endpoint — because only the native API
+    honors options.num_ctx. Over /v1, num_ctx is silently ignored and the model
+    stays at its default 4096-token window, which truncates fetched documents.
+    """
+    think = _think_param(reasoning_effort)
+    num_ctx = _ollama_num_ctx(messages, max_tokens)
+    pinned = bool(os.environ.get("OLLAMA_NUM_CTX"))
+
+    def _post(ctx):
+        options = {"num_ctx": ctx, "num_predict": max_tokens}
+        body = {"model": model, "messages": messages, "stream": False, "options": options}
+        if think is not None:
+            body["think"] = think
+        req = urllib.request.Request(
+            _ollama_native_base() + "/api/chat",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=_ollama_timeout()) as r:
+                return json.loads(r.read()), None
+        except urllib.error.HTTPError as e:
+            return None, (e.code, e.read().decode("utf-8", "replace")[:200])
+
+    while True:
+        data, err = await asyncio.to_thread(_post, num_ctx)
+        if err is None:
+            return ollama_reply_text(data.get("message", {}))
+        code, detail = err
+        # Estimate too small: the real prompt overflowed the window. Grow to the
+        # next bucket and retry so the whole document still fits — unless the
+        # window was explicitly pinned via OLLAMA_NUM_CTX.
+        bigger = next((b for b in _CTX_BUCKETS if b > num_ctx), None)
+        if code == 400 and "context" in detail.lower() and bigger and not pinned:
+            warn("llm", {"grow_num_ctx": {"from": num_ctx, "to": bigger}})
+            num_ctx = bigger
+            continue
+        raise RuntimeError(f"ollama /api/chat {code}: {detail}")
 
 
 async def complete(*, messages, max_tokens, system=None, tools=None, reasoning_effort=None):
@@ -151,13 +232,11 @@ async def complete(*, messages, max_tokens, system=None, tools=None, reasoning_e
             # equivalent yet — see IDEAS.md step 3. Ignore for now; the agent
             # answers from parametric knowledge until a real search tool lands.
             warn("llm", {"warning": "tools ignored under ollama provider", "model": model})
-        client = _ollama_client()
-        response = await client.chat.completions.create(
+        return await ollama_chat(
             model=model,
-            max_tokens=max_tokens,
             messages=with_system(messages, system),
-            **ollama_extra(reasoning_effort),
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
         )
-        return openai_text(response.choices)
 
     raise ValueError(f"unknown MODEL_PROVIDER: {provider!r} (use 'anthropic' or 'ollama')")

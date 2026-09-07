@@ -1,7 +1,10 @@
+import os
+
 from agents.researcher import research
 from agents.summarizer import summarize
 from agents.evaluator import evaluate
-from agents.output import write_outputs
+from agents.notebook import Notebook
+from agents.output import research_base, slugify
 from agents.llm import keep_warm
 from logger import log
 
@@ -10,7 +13,13 @@ MAX_ITERATIONS = 5
 
 async def run_pipeline(topic, dir_name=None):
     await keep_warm()  # pin the local model so repeated runs skip the cold reload
-    notes = await research(topic)
+
+    name = dir_name or slugify(topic)
+    out_dir = os.path.join(research_base(), name)
+    os.makedirs(out_dir, exist_ok=True)
+    notebook = Notebook(out_dir, topic, name)
+
+    notes = await research(topic, notebook)  # writes source notes as it gathers
 
     summary = await summarize(notes, topic)
     iteration = 1
@@ -32,7 +41,7 @@ async def run_pipeline(topic, dir_name=None):
         "verdict": verdict,
     }
 
-    output_dir = write_outputs(result, name=dir_name)
+    output_dir = notebook.finalize(result)
     result["output_dir"] = output_dir
     log("coordinator", {"output_dir": output_dir})
 

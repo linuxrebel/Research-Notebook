@@ -12,7 +12,6 @@ If OBSIDIAN_VAULT is set, also symlinks summary.md into <vault>/Research/<slug>.
 and drops an unhook.sh into the result dir that removes that symlink.
 """
 
-import datetime
 import json
 import os
 import re
@@ -26,25 +25,8 @@ def slugify(topic, maxlen=80):
     return s[:maxlen].strip("-") or "untitled"
 
 
-def summary_md(result):
-    s = result["summary"]
-    key_points = "\n".join(f"- {p}" for p in s.get("keyPoints", []))
-    frontmatter = (
-        "---\n"
-        f'topic: "{result["topic"]}"\n'
-        f"date: {datetime.date.today().isoformat()}\n"
-        f'verdict: {result.get("verdict", "")}\n'
-        "tags: [research, multi-agent-101]\n"
-        "---\n\n"
-    )
-    return (
-        frontmatter
-        + f"# {s.get('title', '(untitled)')}\n\n"
-        f"**Topic:** {result['topic']}\n\n"
-        f"## Key Points\n\n{key_points}\n\n"
-        f"## Takeaway\n\n{s.get('takeaway', '')}\n\n"
-        f"## Research Notes\n\n{result['notes']}\n"
-    )
+def research_base():
+    return os.environ.get("RESEARCH_DIR") or os.path.expanduser("~/research")
 
 
 def _write_unhook_script(out_dir, link):
@@ -137,14 +119,17 @@ def register_vault(vault_path):
     return True
 
 
-def hook_obsidian(result, out_dir, name=None):
-    """Symlink summary.md into the Obsidian vault; return the link path or None.
+def hook_obsidian_dir(out_dir, name):
+    """Symlink the whole research folder into the Obsidian vault; return the link
+    path or None.
 
-    Auto-provisions the vault (creates it + a minimal .obsidian/ marker) so a
-    per-project OBSIDIAN_VAULT works with no manual "open as vault" step.
-    No-op (returns None) when OBSIDIAN_VAULT is unset, or when a real
-    (non-symlink) file already occupies the target — we never clobber notes.
-    `name` sets the note filename; defaults to a slug of the topic.
+    The folder (not a single file) is linked so every note in it — index,
+    sources, summary — lands in the vault and their [[wikilinks]] resolve there,
+    which is what lets Obsidian build the graph across them.
+
+    Auto-provisions the vault. No-op (returns None) when OBSIDIAN_VAULT is unset,
+    or when a real (non-symlink) path already occupies the target — we never
+    clobber existing notes.
     """
     vault = os.environ.get("OBSIDIAN_VAULT")
     if not vault:
@@ -154,35 +139,14 @@ def hook_obsidian(result, out_dir, name=None):
     register_vault(vault)  # best-effort: make it show in Obsidian's switcher
     research_sub = os.path.join(vault, "Research")
     os.makedirs(research_sub, exist_ok=True)
-    link = os.path.join(research_sub, f"{name or slugify(result['topic'])}.md")
-    src = os.path.abspath(os.path.join(out_dir, "summary.md"))
+    link = os.path.join(research_sub, name)
+    src = os.path.abspath(out_dir)
 
     if os.path.islink(link):
         os.remove(link)  # refresh our own prior link
     elif os.path.lexists(link):
-        return None  # a real file is there; leave it alone
+        return None  # a real path is there; leave it alone
 
-    os.symlink(src, link)
+    os.symlink(src, link, target_is_directory=True)
     _write_unhook_script(out_dir, link)
     return link
-
-
-def write_outputs(result, base_dir=None, name=None):
-    """Write the four documents (and Obsidian hook); return the topic directory.
-
-    `name` sets the output subdirectory; defaults to a slug of the topic."""
-    base = base_dir or os.environ.get("RESEARCH_DIR") or os.path.expanduser("~/research")
-    out_dir = os.path.join(base, name or slugify(result["topic"]))
-    os.makedirs(out_dir, exist_ok=True)
-
-    with open(os.path.join(out_dir, "notes.md"), "w") as f:
-        f.write(f"# {result['topic']}\n\n{result['notes']}\n")
-    with open(os.path.join(out_dir, "summary.json"), "w") as f:
-        json.dump(result["summary"], f, indent=2)
-    with open(os.path.join(out_dir, "summary.md"), "w") as f:
-        f.write(summary_md(result))
-    with open(os.path.join(out_dir, "result.json"), "w") as f:
-        json.dump(result, f, indent=2)
-
-    hook_obsidian(result, out_dir, name=name)
-    return out_dir

@@ -6,10 +6,11 @@ import pytest
 import agents.llm as llm
 from agents.llm import (
     _ollama_native_base,
+    _ollama_num_ctx,
+    _think_param,
     anthropic_text,
     keep_warm,
-    ollama_extra,
-    openai_text,
+    ollama_reply_text,
     resolve_model,
     resolve_provider,
     with_system,
@@ -66,39 +67,61 @@ def test_anthropic_text_joins_text_blocks_only():
     assert anthropic_text(blocks) == "one\ntwo"
 
 
-def test_openai_text_extracts_content():
-    choices = [SimpleNamespace(message=SimpleNamespace(content="hello"))]
-    assert openai_text(choices) == "hello"
+def test_reply_text_returns_content():
+    assert ollama_reply_text({"content": "hello"}) == "hello"
 
 
-def test_openai_text_none_becomes_empty():
-    choices = [SimpleNamespace(message=SimpleNamespace(content=None))]
-    assert openai_text(choices) == ""
+def test_reply_text_falls_back_to_thinking_when_blank():
+    # reasoning model spent the budget on hidden thinking; surface it, not ""
+    assert ollama_reply_text({"content": "", "thinking": "step 1..."}) == "step 1..."
 
 
-def test_ollama_extra_defaults_to_none(monkeypatch):
+def test_reply_text_empty_when_nothing():
+    assert ollama_reply_text({"content": ""}) == ""
+
+
+def test_think_param_defaults_to_false(monkeypatch):
     monkeypatch.delenv("OLLAMA_REASONING_EFFORT", raising=False)
-    assert ollama_extra() == {"reasoning_effort": "none"}
+    assert _think_param() is False  # env default "none" -> thinking off
 
 
-def test_ollama_extra_blank_omits(monkeypatch):
+def test_think_param_blank_omits(monkeypatch):
     monkeypatch.setenv("OLLAMA_REASONING_EFFORT", "")
-    assert ollama_extra() == {}
+    assert _think_param() is None  # omit -> model default
 
 
-def test_ollama_extra_custom(monkeypatch):
+def test_think_param_keeps_level(monkeypatch):
     monkeypatch.setenv("OLLAMA_REASONING_EFFORT", "low")
-    assert ollama_extra() == {"reasoning_effort": "low"}
+    assert _think_param() == "low"
 
 
-def test_ollama_extra_override_beats_env(monkeypatch):
+def test_think_param_override_beats_env(monkeypatch):
     monkeypatch.setenv("OLLAMA_REASONING_EFFORT", "none")
-    assert ollama_extra("medium") == {"reasoning_effort": "medium"}
+    assert _think_param("medium") == "medium"
 
 
-def test_ollama_extra_override_blank_allows_default(monkeypatch):
-    monkeypatch.setenv("OLLAMA_REASONING_EFFORT", "none")
-    assert ollama_extra("") == {}
+def test_think_param_override_none_turns_off(monkeypatch):
+    monkeypatch.setenv("OLLAMA_REASONING_EFFORT", "high")
+    assert _think_param("none") is False
+
+
+def test_num_ctx_sizes_small_prompt_to_bucket(monkeypatch):
+    monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
+    msgs = [{"role": "user", "content": "hi"}]
+    assert _ollama_num_ctx(msgs, max_tokens=50) == 2048  # tiny -> smallest bucket
+
+
+def test_num_ctx_grows_with_content(monkeypatch):
+    monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
+    msgs = [{"role": "user", "content": "x" * 40000}]  # ~10k tokens
+    # 10000 + 1200 + 512 = 11712 -> next bucket up
+    assert _ollama_num_ctx(msgs, max_tokens=1200) == 16384
+
+
+def test_num_ctx_env_pins_fixed(monkeypatch):
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "4096")
+    msgs = [{"role": "user", "content": "x" * 40000}]
+    assert _ollama_num_ctx(msgs, max_tokens=1200) == 4096  # explicit pin wins
 
 
 def test_native_base_strips_v1(monkeypatch):

@@ -16,14 +16,16 @@ def _messages(notes, topic):
             "role": "user",
             "content": (
                 f'The research topic was: "{topic}".\n'
-                "Read these research notes and produce a JSON object with\n"
+                "Organize the gathered facts below into a JSON object with\n"
                 'this exact shape: { "title": string, "keyPoints": string[], '
                 '"takeaway": string }.\n'
-                "keyPoints: 3 to 7 strings that directly answer what the topic "
-                "asks. If the topic asks for pros/cons, viability, or a verdict, "
-                "the points must carry them — not generic background.\n"
-                "takeaway: one paragraph stating the actual answer/verdict the "
-                "topic asked for.\n"
+                "keyPoints: 3 to 7 strings, each a fact grounded in the notes. If "
+                "the topic asks for pros and cons, include BOTH; label them (e.g. "
+                '"Pro: ...", "Con: ..."). Do not invent facts not in the notes.\n'
+                "takeaway: a short neutral summary of what the sources show. This "
+                "is a fact collection — do NOT decide the question, recommend, or "
+                "issue a verdict; report the findings and any trade-offs and let "
+                "the reader conclude.\n"
                 "Respond with ONLY the JSON, no other text.\n\n"
                 f"Research notes:\n{notes}"
             ),
@@ -44,9 +46,11 @@ def clamp_key_points(summary, n=7):
     return summary
 
 
-# low reasoning helps pick the best points; max_tokens leaves room for
-# reasoning + the JSON so the answer isn't starved (blank-content bug).
-_MAX_TOKENS = 1200
+# low reasoning helps pick the best points; the budget must cover the reasoning
+# pass AND the JSON answer. Sized for full-document notes: at 1200 the thinking
+# alone consumed the whole budget and the content came back blank (measured on
+# ornith-1.5:9b). Generous here on purpose — quality over speed on a local box.
+_MAX_TOKENS = 4000
 _REASONING = "low"
 
 

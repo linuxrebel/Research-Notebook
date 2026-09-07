@@ -103,23 +103,21 @@ def _fetch_url_sync(url):
     return _strip_html(_get(url))[:_MAX_CHARS]
 
 
-def _fetch_one_sync(url):
-    gh = parse_github(url)
-    try:
-        text = _fetch_github_sync(*gh) if gh else _fetch_url_sync(url)
-    except Exception as e:
-        return f"Source: {url}\n(fetch failed: {str(e)[:150]})"
-    return f"Source: {url}\n{text}"
+async def fetch_one(url):
+    """Fetch and read one URL, off the event loop. Returns (title, text).
 
-
-async def fetch_sources(urls):
-    """Fetch and read each URL (github->API, else page text), off the event loop.
-
-    Returns one formatted block of real document text, or "" for no urls.
-    Duplicate URLs are read once, order preserved.
+    title is "owner/repo" for a GitHub repo, else the URL. text is the repo
+    metadata+README (GitHub) or stripped page text — one source's real content,
+    for its own note.
     """
-    seen = list(dict.fromkeys(u for u in urls if u))
-    if not seen:
-        return ""
-    blocks = await asyncio.to_thread(lambda: [_fetch_one_sync(u) for u in seen])
-    return "\n\n---\n\n".join(blocks)
+
+    def _one():
+        gh = parse_github(url)
+        try:
+            if gh:
+                return f"{gh[0]}/{gh[1]}", _fetch_github_sync(*gh)
+            return url, _fetch_url_sync(url)
+        except Exception as e:
+            return url, f"(fetch failed: {str(e)[:150]})"
+
+    return await asyncio.to_thread(_one)
