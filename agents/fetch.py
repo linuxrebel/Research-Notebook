@@ -2,18 +2,24 @@
 a search-snippet paraphraser.
 
 Every URL that reaches the researcher is fetched and read here: GitHub repos via
-the API (metadata + README + file tree), any other URL as stripped page text.
-DDG (search.py) only *discovers* links; this module reads what's behind them.
+the API (metadata + README + file tree), YouTube videos as their transcript (via
+yt-dlp), any other URL as stripped page text. DDG (search.py) only *discovers*
+links; this module reads what's behind them.
 
-stdlib only (urllib/re/html.parser), Python-side like search.py, so it works
-under any provider.
+stdlib for the web/GitHub paths (urllib/re/html.parser); YouTube shells out to
+yt-dlp. Python-side like search.py, so it works under any provider.
 """
 
 import asyncio
+import glob
 import json
+import os
 import re
+import subprocess
+import tempfile
 import urllib.request
 from html.parser import HTMLParser
+from urllib.parse import urlparse
 
 _URL = re.compile(r"https?://[^\s<>\")]+")
 _GITHUB = re.compile(r"https?://github\.com/([^/\s]+)/([^/\s#?]+)")
@@ -32,6 +38,12 @@ def parse_github(url):
     if not m:
         return None
     return m.group(1), m.group(2).removesuffix(".git")
+
+
+def is_youtube(url):
+    """True for a YouTube video URL — read via yt-dlp transcript, not page text."""
+    host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+    return host in ("youtube.com", "m.youtube.com", "youtu.be")
 
 
 def _get(url, accept=None):
@@ -103,6 +115,53 @@ def _fetch_url_sync(url):
     return _strip_html(_get(url))[:_MAX_CHARS]
 
 
+def _vtt_to_text(path):
+    """Plain caption text from a .vtt: drop timestamps/tags, dedupe roll-up lines."""
+    raw = open(path, encoding="utf-8", errors="replace").read()
+    out, seen = [], None
+    for ln in raw.splitlines():
+        if ("-->" in ln or ln.strip().isdigit()
+                or ln.startswith(("WEBVTT", "Kind:", "Language:")) or not ln.strip()):
+            continue
+        ln = re.sub(r"<[^>]+>", "", ln).strip()
+        if ln and ln != seen:
+            out.append(ln)
+            seen = ln
+    return "\n".join(out)
+
+
+def _ytdlp(args, timeout):
+    return subprocess.run(
+        ["yt-dlp", *args], capture_output=True, text=True, timeout=timeout
+    )
+
+
+def _fetch_youtube_sync(url):
+    """Read a YouTube video as its transcript (English subs, auto or manual).
+
+    Two yt-dlp calls: subtitle download (judged by files written, since a 429 on
+    one language variant sets a nonzero exit even when subs land) and a
+    best-effort title. No API key — yt-dlp is local.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        _ytdlp(
+            ["--skip-download", "--write-auto-subs", "--write-subs",
+             "--sub-langs", "en.*,en", "--sub-format", "vtt",
+             "-o", os.path.join(td, "%(id)s.%(ext)s"), url],
+            timeout=120,
+        )
+        vtts = sorted(glob.glob(os.path.join(td, "*.vtt")))
+        try:
+            t = _ytdlp(["--skip-download", "--print", "title", url], timeout=30)
+            title = (t.stdout.strip().splitlines() or [""])[0] or url
+        except Exception:
+            title = url
+        if not vtts:
+            return title, f"# {title}\n\n(no transcript available for this video)"
+        text = _vtt_to_text(vtts[0])[:_MAX_CHARS]
+        return title, f"# {title}\n\n## Transcript\n{text}"
+
+
 async def fetch_one(url):
     """Fetch and read one URL, off the event loop. Returns (title, text).
 
@@ -112,8 +171,10 @@ async def fetch_one(url):
     """
 
     def _one():
-        gh = parse_github(url)
         try:
+            if is_youtube(url):
+                return _fetch_youtube_sync(url)
+            gh = parse_github(url)
             if gh:
                 return f"{gh[0]}/{gh[1]}", _fetch_github_sync(*gh)
             return url, _fetch_url_sync(url)
