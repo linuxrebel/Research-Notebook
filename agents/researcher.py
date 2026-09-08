@@ -50,7 +50,14 @@ async def _extract(topic, url, text, want_queries):
     )
     try:
         obj = parse_json(raw)
-        facts = obj.get("facts", "").strip() or raw.strip()
+        facts = obj.get("facts", "")
+        # the model sometimes returns facts as a JSON array of strings instead of
+        # one markdown string — join it into bullets rather than dumping raw JSON.
+        if isinstance(facts, list):
+            facts = "\n".join(f"- {str(x).strip()}" for x in facts if str(x).strip())
+        elif not isinstance(facts, str):
+            facts = str(facts)
+        facts = facts.strip() or raw.strip()
         return facts, (obj.get("queries") or [])[:_MAX_FOLLOWUP_QUERIES]
     except Exception:
         warn("researcher", {"warning": "extract JSON parse failed", "url": url, "raw": raw[:200]})
