@@ -78,9 +78,9 @@ async def research(topic, notebook):
         # Primary document(s) named in the topic: read each, note its facts, and
         # let the first one's follow-up queries drive discovery.
         for i, url in enumerate(urls):
-            title, text = await fetch_one(url)
+            title, text, via = await fetch_one(url)
             facts, q = await _extract(topic, url, text, want_queries=(i == 0))
-            notebook.add_source(url, facts, title=title)
+            notebook.add_source(url, facts, title=title, via=via)
             if i == 0:
                 queries = q
         secondary = await _discover(queries, _MAX_SECONDARY_URLS)
@@ -89,9 +89,9 @@ async def research(topic, notebook):
         secondary = await _discover([topic], _MAX_SECONDARY_URLS)
 
     for url in secondary:
-        title, text = await fetch_one(url)
+        title, text, via = await fetch_one(url)
         facts, _ = await _extract(topic, url, text, want_queries=False)
-        notebook.add_source(url, facts, title=title)
+        notebook.add_source(url, facts, title=title, via=via)
 
     notes = notebook.combined_notes()
     log("researcher", {"topic": topic, "primary_urls": urls, "followup_queries": queries,

@@ -175,7 +175,8 @@ _FETCHERS = {"urllib": _fetch_url_sync, "obscura": _obscura_render}
 
 def _fetch_web(url):
     """Read a generic page, escalating urllib -> obscura on failure or a blocked
-    shape. Returns the page text, or a note listing what each backend hit."""
+    shape. Returns (text, backend) — backend is the one that served it, or "none"
+    (with a note listing what each backend hit) when all fail."""
     tried = []
     for name in _ordered_backends():
         if not _PROBES[name]():
@@ -189,8 +190,8 @@ def _fetch_web(url):
         if _looks_blocked(text):
             tried.append(f"{name}:blocked")
             continue
-        return text
-    return f"(no backend could read this page: {'; '.join(tried)})"
+        return text, name
+    return f"(no backend could read this page: {'; '.join(tried)})", "none"
 
 
 def _vtt_to_text(path):
@@ -241,22 +242,25 @@ def _fetch_youtube_sync(url):
 
 
 async def fetch_one(url):
-    """Fetch and read one URL, off the event loop. Returns (title, text).
+    """Fetch and read one URL, off the event loop. Returns (title, text, via).
 
     title is "owner/repo" for a GitHub repo, else the URL. text is the repo
-    metadata+README (GitHub) or stripped page text — one source's real content,
-    for its own note.
+    metadata+README (GitHub), the transcript (YouTube), or page text (web) — one
+    source's real content, for its own note. via is how it was read
+    ("github"/"youtube"/"urllib"/"obscura"/"none"/"error"), for provenance.
     """
 
     def _one():
         try:
             if is_youtube(url):
-                return _fetch_youtube_sync(url)
+                title, text = _fetch_youtube_sync(url)
+                return title, text, "youtube"
             gh = parse_github(url)
             if gh:
-                return f"{gh[0]}/{gh[1]}", _fetch_github_sync(*gh)
-            return url, _fetch_web(url)
+                return f"{gh[0]}/{gh[1]}", _fetch_github_sync(*gh), "github"
+            text, via = _fetch_web(url)
+            return url, text, via
         except Exception as e:
-            return url, f"(fetch failed: {str(e)[:150]})"
+            return url, f"(fetch failed: {str(e)[:150]})", "error"
 
     return await asyncio.to_thread(_one)

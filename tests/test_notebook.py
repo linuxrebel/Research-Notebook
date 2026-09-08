@@ -29,10 +29,11 @@ def test_init_writes_index(tmp_path, monkeypatch):
 
 def test_add_source_writes_note_and_links_index(tmp_path, monkeypatch):
     nb, out = _nb(tmp_path, monkeypatch)
-    slug = nb.add_source("https://github.com/x/y", "- Written in [[Rust]].", title="x/y")
+    slug = nb.add_source("https://github.com/x/y", "- Written in [[Rust]].", title="x/y", via="github")
     note = (tmp_path / "run" / "sources" / f"{slug}.md").read_text()
     assert "[[Rust]]" in note
     assert 'source: "https://github.com/x/y"' in note
+    assert "fetched_via: github" in note  # provenance recorded
     # index links the source with a wikilink Obsidian can graph
     assert f"[[sources/{slug}|x/y]]" in (tmp_path / "run" / "index.md").read_text()
 

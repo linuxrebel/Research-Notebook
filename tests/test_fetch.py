@@ -64,8 +64,8 @@ def test_fetch_one_youtube_branch_uses_transcript(monkeypatch, tmp_path):
     monkeypatch.setattr(fetch, "glob", type("G", (), {
         "glob": staticmethod(lambda pat: [str(vtt)])})())
 
-    title, text = asyncio.run(fetch.fetch_one("https://youtu.be/xyz"))
-    assert title == "My Video Title"
+    title, text, via = asyncio.run(fetch.fetch_one("https://youtu.be/xyz"))
+    assert title == "My Video Title" and via == "youtube"
     assert "## Transcript" in text and "the transcript" in text
 
 
@@ -79,8 +79,8 @@ def test_fetch_one_youtube_no_subs_reports_gracefully(monkeypatch):
     monkeypatch.setattr(fetch, "glob", type("G", (), {
         "glob": staticmethod(lambda pat: [])})())
 
-    title, text = asyncio.run(fetch.fetch_one("https://youtu.be/xyz"))
-    assert title == "Silent Video"
+    title, text, via = asyncio.run(fetch.fetch_one("https://youtu.be/xyz"))
+    assert title == "Silent Video" and via == "youtube"
     assert "no transcript available" in text
 
 
@@ -110,7 +110,8 @@ def test_fetch_web_escalates_past_blocked_urllib(monkeypatch):
         "urllib": lambda u: "Client Challenge" + " " * 300,
         "obscura": lambda u: good,
     })
-    assert fetch._fetch_web("https://pypi.org/x") == good
+    text, via = fetch._fetch_web("https://pypi.org/x")
+    assert text == good and via == "obscura"
 
 
 def test_fetch_web_urllib_wins_when_unblocked(monkeypatch):
@@ -120,8 +121,8 @@ def test_fetch_web_urllib_wins_when_unblocked(monkeypatch):
         "urllib": lambda u: "plenty of real content " * 20,
         "obscura": lambda u: calls.append(u) or "should not run",
     })
-    out = fetch._fetch_web("https://example.com")
-    assert "real content" in out and calls == []  # obscura never invoked
+    out, via = fetch._fetch_web("https://example.com")
+    assert "real content" in out and via == "urllib" and calls == []  # obscura never invoked
 
 
 def test_fetch_web_reports_when_all_fail(monkeypatch):
@@ -130,8 +131,8 @@ def test_fetch_web_reports_when_all_fail(monkeypatch):
         "urllib": lambda u: "captcha" + " " * 300,
         "obscura": lambda u: "unused",
     })
-    out = fetch._fetch_web("https://x")
-    assert out.startswith("(no backend could read this page")
+    out, via = fetch._fetch_web("https://x")
+    assert via == "none" and out.startswith("(no backend could read this page")
     assert "urllib:blocked" in out and "obscura:absent" in out
 
 

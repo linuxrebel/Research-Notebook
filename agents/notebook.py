@@ -37,15 +37,17 @@ class Notebook:
         os.makedirs(os.path.join(out_dir, "sources"), exist_ok=True)
         self._write_index()
 
-    def add_source(self, url, facts, title=None):
-        """Write one source note and link it from the index. Returns its slug."""
+    def add_source(self, url, facts, title=None, via=None):
+        """Write one source note and link it from the index. `via` records how the
+        source was read (provenance). Returns its slug."""
         title = title or url or "source"
         slug = _source_slug(url, title, len(self.sources) + 1)
         note = (
             "---\n"
             f'source: "{url}"\n'
             f"fetched: {datetime.date.today().isoformat()}\n"
-            "tags: [source]\n"
+            + (f"fetched_via: {via}\n" if via else "")
+            + "tags: [source]\n"
             "---\n\n"
             f"# {title}\n\n"
             f"Source: {url}\n\n"

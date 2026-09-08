@@ -126,6 +126,13 @@ if ! ollama list | awk '{print $1}' | grep -Fxq "$MODEL"; then
   exit 1
 fi
 
+# --- optional fetch backends (soft deps: absent only warns; the tool still
+# runs on urllib for easy pages) ---
+command -v obscura >/dev/null 2>&1 || \
+  echo "Note: 'obscura' not found — JS/anti-bot-walled pages won't be readable (urllib only). Install a release: https://github.com/h4ckf0r0day/obscura/releases"
+command -v yt-dlp >/dev/null 2>&1 || \
+  echo "Note: 'yt-dlp' not found — YouTube URLs won't be read as transcripts. Install: pipx install yt-dlp"
+
 # --- sync project into $DEST (in place; --delete prunes files removed from
 # source). Excluded paths (.venv/.env) are protected from --delete, so the venv
 # and config survive an update untouched. ---
