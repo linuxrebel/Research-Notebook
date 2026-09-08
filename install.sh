@@ -166,6 +166,10 @@ OLLAMA_KEEP_ALIVE=30m
 # Seconds per model call. CPU generation is slow; the default is generous.
 OLLAMA_TIMEOUT=1800
 
+# Web-page fetch backend: unset = urllib first, then the obscura headless
+# browser for JS / anti-bot-walled pages. Pin one with 'urllib' or 'obscura'.
+# FETCH_BACKEND=
+
 # Anthropic provider (only needed when MODEL_PROVIDER=anthropic)
 ANTHROPIC_API_KEY=
 CLAUDE_MODEL=claude-sonnet-5
