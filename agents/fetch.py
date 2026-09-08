@@ -3,11 +3,13 @@ a search-snippet paraphraser.
 
 Every URL that reaches the researcher is fetched and read here: GitHub repos via
 the API (metadata + README + file tree), YouTube videos as their transcript (via
-yt-dlp), any other URL as stripped page text. DDG (search.py) only *discovers*
-links; this module reads what's behind them.
+yt-dlp), any other URL as page text via an ordered backend chain (urllib, then
+the obscura headless browser for JS/anti-bot walls). DDG (search.py) only
+*discovers* links; this module reads what's behind them.
 
-stdlib for the web/GitHub paths (urllib/re/html.parser); YouTube shells out to
-yt-dlp. Python-side like search.py, so it works under any provider.
+stdlib for the GitHub/urllib paths (urllib/re/html.parser); YouTube shells out
+to yt-dlp and hard pages to obscura. Python-side like search.py, so it works
+under any provider.
 """
 
 import asyncio
@@ -15,6 +17,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import urllib.request
@@ -115,6 +118,81 @@ def _fetch_url_sync(url):
     return _strip_html(_get(url))[:_MAX_CHARS]
 
 
+# --- generic web page: ordered backend chain (urllib -> obscura) -------------
+# urllib is free and reads most pages; a JS/anti-bot wall (Cloudflare, PyPI's
+# "Client Challenge") returns a 200 with a challenge stub, not an error, so we
+# escalate on *shape* (blocked/thin), not HTTP status. obscura is a local
+# headless browser (V8) that runs the challenge and reads the real page.
+_WEB_BACKENDS = ("urllib", "obscura")
+_BLOCK_MARKERS = (
+    "client challenge", "just a moment", "checking your browser",
+    "verifying your browser", "verify you are human", "enable javascript",
+    "cf-browser-verification", "captcha",
+)
+
+
+def _ordered_backends():
+    """Backends in probe order, honoring FETCH_BACKEND (moves it to the front)."""
+    order = list(_WEB_BACKENDS)
+    pin = os.getenv("FETCH_BACKEND")
+    if pin in order:
+        order.insert(0, order.pop(order.index(pin)))
+    return order
+
+
+def _looks_blocked(text):
+    """A page we didn't really get: empty, too thin, or a known challenge stub."""
+    if not text or len(text.strip()) < 200:
+        return True
+    low = text[:2000].lower()
+    return any(m in low for m in _BLOCK_MARKERS)
+
+
+def _runs(*cmd):
+    """True if the command runs and exits 0 — real probe, not just PATH presence."""
+    try:
+        return subprocess.run(cmd, capture_output=True, timeout=10).returncode == 0
+    except Exception:
+        return False
+
+
+def _probe_obscura():
+    return bool(shutil.which("obscura")) and _runs("obscura", "--version")
+
+
+def _obscura_render(url):
+    r = subprocess.run(
+        ["obscura", "fetch", url, "--dump", "text", "--stealth", "--quiet",
+         "--timeout", "45", "--wait-until", "networkidle0"],
+        capture_output=True, text=True, timeout=90,
+    )
+    return r.stdout[:_MAX_CHARS]
+
+
+_PROBES = {"urllib": lambda: True, "obscura": _probe_obscura}
+_FETCHERS = {"urllib": _fetch_url_sync, "obscura": _obscura_render}
+
+
+def _fetch_web(url):
+    """Read a generic page, escalating urllib -> obscura on failure or a blocked
+    shape. Returns the page text, or a note listing what each backend hit."""
+    tried = []
+    for name in _ordered_backends():
+        if not _PROBES[name]():
+            tried.append(f"{name}:absent")
+            continue
+        try:
+            text = _FETCHERS[name](url)
+        except Exception as e:
+            tried.append(f"{name}:{str(e)[:40]}")
+            continue
+        if _looks_blocked(text):
+            tried.append(f"{name}:blocked")
+            continue
+        return text
+    return f"(no backend could read this page: {'; '.join(tried)})"
+
+
 def _vtt_to_text(path):
     """Plain caption text from a .vtt: drop timestamps/tags, dedupe roll-up lines."""
     raw = open(path, encoding="utf-8", errors="replace").read()
@@ -177,7 +255,7 @@ async def fetch_one(url):
             gh = parse_github(url)
             if gh:
                 return f"{gh[0]}/{gh[1]}", _fetch_github_sync(*gh)
-            return url, _fetch_url_sync(url)
+            return url, _fetch_web(url)
         except Exception as e:
             return url, f"(fetch failed: {str(e)[:150]})"
 

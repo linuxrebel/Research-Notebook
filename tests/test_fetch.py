@@ -84,6 +84,57 @@ def test_fetch_one_youtube_no_subs_reports_gracefully(monkeypatch):
     assert "no transcript available" in text
 
 
+def test_looks_blocked_catches_stub_and_challenge():
+    assert fetch._looks_blocked("")
+    assert fetch._looks_blocked("   ")
+    assert fetch._looks_blocked("too short")
+    assert fetch._looks_blocked("<div>Client Challenge</div>" + " " * 300)
+    assert fetch._looks_blocked("Fastly is verifying your browser..." + " " * 300)
+    assert not fetch._looks_blocked("real page content, " * 40)
+
+
+def test_ordered_backends_default_and_pin(monkeypatch):
+    monkeypatch.delenv("FETCH_BACKEND", raising=False)
+    assert fetch._ordered_backends() == ["urllib", "obscura"]
+    monkeypatch.setenv("FETCH_BACKEND", "obscura")
+    assert fetch._ordered_backends() == ["obscura", "urllib"]
+    monkeypatch.setenv("FETCH_BACKEND", "bogus")  # unknown ignored
+    assert fetch._ordered_backends() == ["urllib", "obscura"]
+
+
+def test_fetch_web_escalates_past_blocked_urllib(monkeypatch):
+    """urllib returns a challenge stub -> escalate to obscura, which reads it."""
+    good = "the real rendered page content " * 20
+    monkeypatch.setattr(fetch, "_PROBES", {"urllib": lambda: True, "obscura": lambda: True})
+    monkeypatch.setattr(fetch, "_FETCHERS", {
+        "urllib": lambda u: "Client Challenge" + " " * 300,
+        "obscura": lambda u: good,
+    })
+    assert fetch._fetch_web("https://pypi.org/x") == good
+
+
+def test_fetch_web_urllib_wins_when_unblocked(monkeypatch):
+    calls = []
+    monkeypatch.setattr(fetch, "_PROBES", {"urllib": lambda: True, "obscura": lambda: True})
+    monkeypatch.setattr(fetch, "_FETCHERS", {
+        "urllib": lambda u: "plenty of real content " * 20,
+        "obscura": lambda u: calls.append(u) or "should not run",
+    })
+    out = fetch._fetch_web("https://example.com")
+    assert "real content" in out and calls == []  # obscura never invoked
+
+
+def test_fetch_web_reports_when_all_fail(monkeypatch):
+    monkeypatch.setattr(fetch, "_PROBES", {"urllib": lambda: True, "obscura": lambda: False})
+    monkeypatch.setattr(fetch, "_FETCHERS", {
+        "urllib": lambda u: "captcha" + " " * 300,
+        "obscura": lambda u: "unused",
+    })
+    out = fetch._fetch_web("https://x")
+    assert out.startswith("(no backend could read this page")
+    assert "urllib:blocked" in out and "obscura:absent" in out
+
+
 def tmp_write(text):
     import tempfile
     fd, path = tempfile.mkstemp(suffix=".vtt")
