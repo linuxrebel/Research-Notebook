@@ -152,6 +152,12 @@ MODEL=$MODEL
 OLLAMA_BASE_URL=$OLLAMA_URL
 OLLAMA_REASONING_EFFORT=none
 OLLAMA_KEEP_ALIVE=30m
+# Context window: unset = sized to each call's content (recommended). Set to pin
+# a fixed window, e.g. OLLAMA_NUM_CTX=16384. Only the native /api/chat path
+# honors this (the tool uses it).
+# OLLAMA_NUM_CTX=
+# Seconds per model call. CPU generation is slow; the default is generous.
+OLLAMA_TIMEOUT=1800
 
 # Anthropic provider (only needed when MODEL_PROVIDER=anthropic)
 ANTHROPIC_API_KEY=

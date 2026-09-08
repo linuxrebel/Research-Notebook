@@ -16,6 +16,13 @@ Status legend: `[ ]` todo · `[x]` done & verified.
 `bash -n` clean · CLI flow exercised live (decline + collision-abort) against a
 running Ollama · installer root-gate and vault-discovery snippet run correctly.
 
+> **Update (2026-09-07):** the research + output subsystems have since been
+> rebuilt (see `IDEAS.md` top entries). The pipeline now reads real sources and
+> writes an interlinked note-set via `agents/notebook.py`; the old
+> `write_outputs`/`hook_obsidian` names in §2 below are replaced by
+> `Notebook.finalize()` / `hook_obsidian_dir()`, but the CLI/installer/launcher
+> design in this doc is unchanged and shipped. Test count is now 74.
+
 **Not yet run:** the full `/opt` install (`sudo ./install.sh`) — venv build,
 file copy, `.env` generation, and the `ollama list` model check are
 statically verified but not executed end-to-end (needs root; awaiting go).
